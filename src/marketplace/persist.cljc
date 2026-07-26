@@ -106,8 +106,21 @@
 (defn- doc-attr [kind k]
   (keyword (str "mp." (name kind)) (name k)))
 
+(defn doc-eid
+  "The stable subject for one document. Kind-scoped so two actors sharing
+  a database cannot collide on the same id."
+  [kind id]
+  (str "mp." (name kind) "/" id))
+
 (defn doc->tx
-  "One domain map as transactable datoms.
+  "One domain map as transactable datoms — `[e a v]` TRIPLES.
+
+  Triples, not entity maps, because that is what the store actually
+  accepts: `kotobase-peer` takes `{:s :p :o}`, `[:db/add e a v]` or
+  `[e a v]` and throws \"unrecognized tx-data item\" on anything else.
+  An entity-map shape worked against the in-memory test double and
+  failed on the first real transact, which is exactly the kind of gap a
+  memory-only backend hides.
 
   Two attributes: the id (what `get-doc` looks up) and the whole
   document as one encoded blob.
@@ -126,9 +139,11 @@
   in a shared database — a real risk once several actors point at the
   same D1 binding."
   [kind id-key m]
-  [{:mp/kind (name kind)
-    (doc-attr kind :id) (str (get m id-key))
-    (doc-attr kind :doc) (enc m)}])
+  (let [id (str (get m id-key))
+        e (doc-eid kind id)]
+    [[e :mp/kind (name kind)]
+     [e (doc-attr kind :id) id]
+     [e (doc-attr kind :doc) (enc m)]]))
 
 (defn tx->doc
   "Reverse `doc->tx` for one pulled entity. nil when the entity carries
@@ -170,12 +185,17 @@
   sequence should pass a timestamp; what must not happen is this
   namespace inventing one."
   [{:keys [api stream]} seq-fn fact]
-  (let [n (seq-fn)]
+  (let [n (seq-fn)
+        ;; Zero-padded, because the store stringifies values on the way
+        ;; in: an integer ordinal would come back as "10" < "9" and read
+        ;; the ledger out of order.
+        ord (let [s (str n)] (str (subs "000000000000" 0 (max 0 (- 12 (count s)))) s))
+        e (str "mp.event/" (name stream) "/" ord)]
     ((:transact! api)
-     [{:mp/kind "event"
-       :mp.event/stream (name stream)
-       :mp.event/seq n
-       :mp.event/fact (enc fact)}])
+     [[e :mp/kind "event"]
+      [e :mp.event/stream (name stream)]
+      [e :mp.event/seq ord]
+      [e :mp.event/fact (enc fact)]])
     fact))
 
 (defn read-events
@@ -239,15 +259,16 @@
   []
   (let [a (atom {:eid 0 :entities {}})]
     {:memory? true
+     ;; Accepts the same `[e a v]` triples the real store does, so what
+     ;; passes here is what the store will accept.
      :transact!
      (fn [tx-data]
-       (doseq [m tx-data]
-         (let [id-attr (first (filter #(= "id" (name %)) (keys m)))
-               existing (when id-attr
-                          (ffirst (filter (fn [[_ e]] (= (get e id-attr) (get m id-attr)))
-                                          (:entities @a))))
-               eid (or existing (:eid (swap! a update :eid inc)))]
-           (swap! a assoc-in [:entities eid] (assoc m :db/id eid))))
+       (doseq [item tx-data]
+         (let [[e attr v] (if (and (vector? item) (= 4 (count item)))
+                            (rest item)          ; [:db/add e a v]
+                            item)]
+           (swap! a assoc-in [:entities (str e) attr] v)
+           (swap! a assoc-in [:entities (str e) :db/id] (str e))))
        tx-data)
      ;; Exactly the two shapes this namespace issues:
      ;;   [:find ?e   :where [?e attr <value>]]  -> entity ids

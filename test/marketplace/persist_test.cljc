@@ -155,7 +155,10 @@
       (testing "the write is visible to the actor immediately"
         (is (= "b1" (:buyer (p/get-doc c "ord-1")))))
       (testing "and is queued for the host to flush in ONE transact"
-        (is (= 1 (count (p/recorded api))))))))
+        (is (= 3 (count (p/recorded api)))
+            "one document is three triples: kind, id, doc blob")
+        (is (every? vector? (p/recorded api))
+            "triples, not entity maps — what kotobase-peer actually accepts")))))
 
 (deftest a-recording-api-starts-from-a-loaded-snapshot
   (let [pre (p/recording-db-api)
