@@ -142,3 +142,35 @@
 
 (deftest an-empty-stream-reads-empty
   (is (= [] (p/read-events (p/stream-ctx (st) :ledger)))))
+
+;; ───────────────────── the host's async bridge ─────────────────────
+
+(deftest a-recording-api-answers-reads-and-accumulates-writes
+  (testing "how a synchronous actor runs on an asynchronous store:
+            load -> compute -> flush"
+    (let [api (p/recording-db-api)
+          s (p/store {:db-api api :actor "orderops"})
+          c (p/ctx s :order :order-id)]
+      (p/put-doc! c {:order-id "ord-1" :buyer "b1"})
+      (testing "the write is visible to the actor immediately"
+        (is (= "b1" (:buyer (p/get-doc c "ord-1")))))
+      (testing "and is queued for the host to flush in ONE transact"
+        (is (= 1 (count (p/recorded api))))))))
+
+(deftest a-recording-api-starts-from-a-loaded-snapshot
+  (let [pre (p/recording-db-api)
+        s0 (p/store {:db-api pre :actor "orderops"})]
+    (p/put-doc! (p/ctx s0 :order :order-id) {:order-id "ord-1" :buyer "b1"})
+    (testing "a later request seeded with what D1 held sees the earlier write"
+      (let [api (p/recording-db-api (p/recorded pre))
+            s (p/store {:db-api api :actor "orderops"})]
+        (is (= "b1" (:buyer (p/get-doc (p/ctx s :order :order-id) "ord-1"))))
+        (testing "and records nothing until this request writes something"
+          (is (empty? (p/recorded api))))))))
+
+(deftest a-recording-api-is-not-labelled-memory
+  (testing "the host WILL flush it, so a readiness check must not refuse it
+            the way it refuses the test-only backend"
+    (is (false? (:persist/memory? (p/store {:db-api (p/recording-db-api)
+                                            :actor "x"}))))
+    (is (true? (:persist/memory? (p/store {:db-api (p/mem-db-api) :actor "x"}))))))

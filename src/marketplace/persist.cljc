@@ -263,3 +263,47 @@
             [(if (= find-sym e-sym) eid (get ent attr))]))))
      :pull (fn [eid _] (get-in @a [:entities eid]))
      :datoms (fn [] (vals (:entities @a)))}))
+
+;; ───────────────────── the host's async bridge ─────────────────────
+
+(defn recording-db-api
+  "A `db-api` that answers reads from a pre-loaded snapshot and RECORDS
+  every write instead of performing one.
+
+  This is how a synchronous actor runs on an asynchronous store. The
+  Cloudflare D1 provider is Promise-based; `marketplace.persist` is not,
+  and making it async would ripple through every actor's `Store`
+  protocol to no benefit — the actors are pure and synchronous by
+  design, and the policy already says the host owns transport.
+
+  So the host does load → compute → flush:
+
+  1. `await` the current state out of D1 and seed it here
+  2. run the actor synchronously against this api
+  3. `await` a single transact of `(recorded api)` back into D1
+
+  One transact, so the whole request's writes land or none do, and
+  kotobase's own `kotobase_refs.revision` CAS is what makes concurrent
+  requests safe rather than anything invented here.
+
+  `seed` is `[tx-data ...]` as `doc->tx` / `append-event!` produce it."
+  ([] (recording-db-api []))
+  ([seed]
+   (let [mem (mem-db-api)
+         log (atom [])]
+     ;; `recorded` hands back a FLAT tx-data vector, so it seeds in one
+     ;; call — iterating it would pass a single entity map where a
+     ;; sequence of them is expected.
+     (when (seq seed) ((:transact! mem) seed))
+     (assoc mem
+            :memory? false            ; the host WILL flush this to D1
+            :recording? true
+            :recorded (fn [] @log)
+            :transact! (fn [tx-data]
+                         (swap! log into tx-data)
+                         ((:transact! mem) tx-data))))))
+
+(defn recorded
+  "The tx-data a `recording-db-api` accumulated, ready for one flush."
+  [api]
+  (when-let [f (:recorded api)] (vec (f))))
