@@ -109,25 +109,33 @@
 (defn doc->tx
   "One domain map as transactable datoms.
 
-  `id-key` names the field that is the entity's identity; it becomes
-  `:mp.<kind>/id` and is what `get-doc` looks up. Every other key is
-  namespaced under the kind so two actors' documents cannot collide in
-  a shared database — a real risk once several actors point at the same
-  D1 binding."
+  Two attributes: the id (what `get-doc` looks up) and the whole
+  document as one encoded blob.
+
+  Storing the document whole rather than fanning it out per attribute is
+  deliberate. A domain map here has NAMESPACED keys — `:buyer/level`,
+  `:order/sellers` — and fanning them into `:mp.<kind>/level` throws the
+  namespace away, so `:buyer/level` reads back as `:level` and every
+  consumer breaks silently. Preserving it would mean mangling the
+  namespace into the attribute name, which is worse. The cost is that
+  this layer supports lookup BY ID ONLY; nothing in it ever queried by
+  another attribute, and a real datalog query belongs in the host with
+  its own schema rather than being faked here.
+
+  `:mp.<kind>/` scoping still keeps two actors' documents from colliding
+  in a shared database — a real risk once several actors point at the
+  same D1 binding."
   [kind id-key m]
-  [(into {:mp/kind (name kind)
-          (doc-attr kind :id) (str (get m id-key))}
-         (for [[k v] m] [(doc-attr kind k) (enc v)]))])
+  [{:mp/kind (name kind)
+    (doc-attr kind :id) (str (get m id-key))
+    (doc-attr kind :doc) (enc m)}])
 
 (defn tx->doc
-  "Reverse `doc->tx` for one pulled entity."
+  "Reverse `doc->tx` for one pulled entity. nil when the entity carries
+  no document blob for this kind."
   [kind e]
-  (let [prefix (str "mp." (name kind))]
-    (into {}
-          (for [[k v] e
-                :when (and (keyword? k) (= prefix (namespace k))
-                           (not= "id" (name k)))]
-            [(keyword (name k)) (dec* v)]))))
+  (when-let [blob (get e (doc-attr kind :doc))]
+    (dec* blob)))
 
 (defn put-doc!
   "Write (or replace) one document."
