@@ -13,7 +13,15 @@
         ;; GTIN-14 normalization + GS1 check digit + product/party ids
         io.github.kotoba-lang/product-party {:local/root "../product-party"}
         ;; buyer-facing index/tokenize/score
-        io.github.kotoba-lang/search        {:local/root "../search"}}
+        io.github.kotoba-lang/search        {:local/root "../search"}
+        ;; order lines, totals and the status-transition table. A
+        ;; marketplace order is a parent over per-seller okaimono
+        ;; sub-orders, so the courier and warehouse actors consume records
+        ;; they already understand.
+        io.github.kotoba-lang/okaimono      {:local/root "../okaimono"}
+        ;; mission / action+safety-class / gate / safety-stop / telemetry.
+        ;; Policy, not control -- see marketplace.fulfillment.
+        io.github.kotoba-lang/robotics      {:local/root "../robotics"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {io.github.cognitect-labs/test-runner
