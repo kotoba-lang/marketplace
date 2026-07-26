@@ -39,6 +39,14 @@
 (deftest over-picking-is-an-error
   (is (some #(= :over-pick (:fulfillment.error/code %))
             (ff/pick-errors sub [{:sku "A1" :qty 3}])) "ordered 2")
+  (testing "quantities are aggregated per SKU — two passes of 2 and 1 against
+            an order for 2 must not both pass individually while three units
+            leave the shelf. A second pass is the normal way a short pick gets
+            topped up, so this is not hypothetical"
+    (is (some #(= :over-pick (:fulfillment.error/code %))
+              (ff/pick-errors sub [{:sku "A1" :qty 2} {:sku "A1" :qty 1}])))
+    (is (empty? (ff/pick-errors sub [{:sku "A1" :qty 1} {:sku "A1" :qty 1}]))
+        "two passes summing to exactly the order are clean"))
   (is (empty? (ff/pick-errors sub [{:sku "A1" :qty 2} {:sku "A2" :qty 3}]))
       "picking exactly the order is clean"))
 

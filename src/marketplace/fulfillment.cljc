@@ -102,23 +102,32 @@
   checked here — against the order — rather than being left to the
   robot's own confidence in its barcode read.
 
-  `picks` is `[{:sku .. :qty ..} ..]`."
+  `picks` is `[{:sku .. :qty ..} ..]`.
+
+  Quantities are AGGREGATED per SKU before comparison. Checking each
+  entry on its own would let two passes of 2 and 1 against an order for
+  2 both pass individually while three units leave the shelf — and a
+  second pick pass is the normal way a short pick gets topped up, so
+  that is not a hypothetical."
   [sub-order picks]
-  (vec
-   (concat
-    (for [{:keys [sku]} picks
-          :when (zero? (ordered-qty sub-order sku))]
-      {:fulfillment.error/code :sku-not-in-order
-       :fulfillment.error/detail (str sku " は注文に含まれていない")})
-    (for [{:keys [sku qty]} picks
-          :let [want (ordered-qty sub-order sku)]
-          :when (and (pos? want) (> qty want))]
-      {:fulfillment.error/code :over-pick
-       :fulfillment.error/detail (str sku " 注文 " want " に対し " qty " をピックしようとしている")})
-    (for [{:keys [sku qty]} picks
-          :when (not (and (integer? qty) (pos? qty)))]
-      {:fulfillment.error/code :invalid-pick-qty
-       :fulfillment.error/detail (str sku)}))))
+  (let [totals (reduce (fn [m {:keys [sku qty]}]
+                         (update m sku (fnil + 0) (if (number? qty) qty 0)))
+                       {} picks)]
+    (vec
+     (concat
+      (for [[sku _] (sort totals)
+            :when (zero? (ordered-qty sub-order sku))]
+        {:fulfillment.error/code :sku-not-in-order
+         :fulfillment.error/detail (str sku " は注文に含まれていない")})
+      (for [[sku got] (sort totals)
+            :let [want (ordered-qty sub-order sku)]
+            :when (and (pos? want) (> got want))]
+        {:fulfillment.error/code :over-pick
+         :fulfillment.error/detail (str sku " 注文 " want " に対し合計 " got " をピックしようとしている")})
+      (for [{:keys [sku qty]} picks
+            :when (not (and (integer? qty) (pos? qty)))]
+        {:fulfillment.error/code :invalid-pick-qty
+         :fulfillment.error/detail (str sku)})))))
 
 (defn short-picks
   "SKUs picked in fewer units than ordered. NOT an error — a short pick
