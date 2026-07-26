@@ -114,9 +114,13 @@
 
 (deftest escrow-lifecycle
   (let [e (st/escrow {:id "esc-1" :plan (plan (lines ["merchant.a" 1000]) 1000)
+                      :basket "basket-1"
                       :opened-at "2026-06-01T00:00:00Z"
                       :release-after "2026-06-08T00:00:00Z"})]
     (is (= :held (:escrow/state e)))
+    (is (= "basket-1" (:escrow/basket e))
+        "an escrow must be able to say which order it covers, or it cannot
+         be released against a delivery confirmation")
     (is (false? (:escrow/custodial? e)))
     (is (= :released (:escrow/state (st/advance-escrow e :released))))
     (is (nil? (st/advance-escrow (st/advance-escrow e :released) :refunded))

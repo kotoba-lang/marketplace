@@ -249,10 +249,17 @@
 
 (defn escrow
   "Open an escrow record over a settlement plan. `opened-at` comes from
-  the caller — no clock here."
-  [{:keys [id plan opened-at release-after]}]
+  the caller — no clock here.
+
+  `:basket` names the order this escrow covers. It belongs on the record
+  rather than being tracked separately by the caller, because
+  `releasable?` needs a delivery confirmation and a delivery
+  confirmation is about an ORDER — an escrow that cannot say which order
+  it belongs to cannot be released safely."
+  [{:keys [id plan basket opened-at release-after]}]
   {:escrow/id            id
    :escrow/plan          plan
+   :escrow/basket        basket
    :escrow/state         :held
    :escrow/opened-at     opened-at
    :escrow/release-after release-after
