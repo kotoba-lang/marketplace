@@ -1,0 +1,257 @@
+(ns marketplace.persist
+  "Durable storage for marketplace actors — over an INJECTED database
+  API, never a required one.
+
+  ## Why this namespace requires nothing
+
+  `manifest/org-database-policy.edn` and its ADR draw a hard line: *the
+  host owns D1 binding/transport construction, tenant/database/ref
+  selection, CACAO authorization, encryption/decryption, blind indexing,
+  visibility policy, pooling, migrations and secrets. Product modules
+  receive an already-open database.* `kotobase.engine/open` enforces the
+  same thing from the other side — it throws unless every security
+  control (`encrypt-fn`, `decrypt-fn`, `blind-fn`, `visible?`) is
+  supplied explicitly.
+
+  So this namespace takes a `db-api` map of the four functions it needs
+  and requires no storage library at all:
+
+  ```clojure
+  {:transact! (fn [tx-data] ...)   ; kotobase.core/transact! partial'd on db
+   :q         (fn [pattern] ...)   ; kotobase.core/q
+   :pull      (fn [eid pattern] ...)
+   :datoms    (fn [] ...)}
+  ```
+
+  A production host partials these onto an open `kotobase.core`
+  database; a test supplies `mem-db-api`. Nothing here can reach a
+  network, hold a credential, or choose a tenant.
+
+  ## Fail closed
+
+  `store` refuses a nil or partial `db-api` rather than silently
+  degrading to memory. The policy says `:database/memory :test-only` and
+  `:policy/fail-closed-without-host-injection true`; an actor whose host
+  wiring is missing must not come up quietly writing to a map that
+  vanishes on restart.
+
+  ## Encoding
+
+  Compound values are stored as EDN-string blobs, the same codec ~190
+  cloud-itonami stores hand-roll and `langchain-store` centralises, so
+  the datom layer does not expand a nested order into sub-entities.
+  Application-owned per the policy split (`:policy/application-owns
+  [:datoms :queries :domain-schema :retention-classification]`)."
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]))
+
+;; ───────────────────────────── codec ─────────────────────────────
+
+(def ^:private str-tag "s:")
+(def ^:private edn-tag "e:")
+
+(defn enc
+  "Encode a value for a datom.
+
+  Numbers, booleans and nil stay native so a backend can index and
+  compare them. Everything else becomes a TAGGED string: `s:` for a
+  plain string, `e:` for an EDN-printed compound value.
+
+  The tag is not decoration. Without it a stored `\"an order\"` is
+  indistinguishable from a stored EDN blob, and decoding reads it back
+  as the symbol `an` — silent, and exactly the kind of corruption that
+  surfaces months later as a mangled record."
+  [v]
+  (cond
+    (or (number? v) (boolean? v) (nil? v)) v
+    (string? v)                            (str str-tag v)
+    :else                                  (str edn-tag (pr-str v))))
+
+(defn dec*
+  "Decode a value written by `enc`. An untagged value is returned as-is,
+  so a field written by something other than `enc` is passed through
+  rather than mangled."
+  [v]
+  (if (string? v)
+    (cond
+      (str/starts-with? v str-tag) (subs v (count str-tag))
+      (str/starts-with? v edn-tag) (try (edn/read-string (subs v (count edn-tag)))
+                                        (catch #?(:clj Exception :cljs :default) _ v))
+      :else v)
+    v))
+
+;; ───────────────────────── the injected API ─────────────────────────
+
+(def required-api-fns
+  "The four `kotobase.core` operations this namespace needs. Anything
+  else — `open`, `head`, `query` — stays with the host."
+  [:transact! :q :pull :datoms])
+
+(defn db-api-errors
+  "Errors in a host-supplied `db-api`. A partial map is an error, not a
+  reason to fall back."
+  [api]
+  (vec
+   (concat
+    (when-not (map? api)
+      [{:persist.error/code :missing-db-api
+        :persist.error/detail "host が開いたデータベース API が注入されていない"}])
+    (when (map? api)
+      (for [k required-api-fns
+            :when (not (ifn? (get api k)))]
+        {:persist.error/code :missing-db-fn :persist.error/fn k})))))
+
+;; ───────────────────────────── documents ─────────────────────────────
+
+(defn- doc-attr [kind k]
+  (keyword (str "mp." (name kind)) (name k)))
+
+(defn doc->tx
+  "One domain map as transactable datoms.
+
+  `id-key` names the field that is the entity's identity; it becomes
+  `:mp.<kind>/id` and is what `get-doc` looks up. Every other key is
+  namespaced under the kind so two actors' documents cannot collide in
+  a shared database — a real risk once several actors point at the same
+  D1 binding."
+  [kind id-key m]
+  [(into {:mp/kind (name kind)
+          (doc-attr kind :id) (str (get m id-key))}
+         (for [[k v] m] [(doc-attr kind k) (enc v)]))])
+
+(defn tx->doc
+  "Reverse `doc->tx` for one pulled entity."
+  [kind e]
+  (let [prefix (str "mp." (name kind))]
+    (into {}
+          (for [[k v] e
+                :when (and (keyword? k) (= prefix (namespace k))
+                           (not= "id" (name k)))]
+            [(keyword (name k)) (dec* v)]))))
+
+(defn put-doc!
+  "Write (or replace) one document."
+  [{:keys [api kind id-key]} m]
+  ((:transact! api) (doc->tx kind id-key m))
+  m)
+
+(defn get-doc
+  "Read one document by its id, or nil."
+  [{:keys [api kind]} id]
+  (let [hits ((:q api) [:find '?e :where ['?e (doc-attr kind :id) (str id)]])]
+    (when-let [eid (ffirst hits)]
+      (tx->doc kind ((:pull api) eid '[*])))))
+
+(defn all-docs
+  "Every document of a kind, id-sorted for determinism."
+  [{:keys [api kind] :as ctx}]
+  (->> ((:q api) [:find '?id :where ['_ (doc-attr kind :id) '?id]])
+       (map first)
+       sort
+       (keep #(get-doc ctx %))
+       vec))
+
+;; ───────────────────────── append-only event log ─────────────────────────
+
+(defn append-event!
+  "Append one immutable fact to an actor's ledger.
+
+  `seq-fn` supplies the ordinal — injected rather than derived from a
+  count, because a count is a read-modify-write and two concurrent
+  appends would collide on it. A host that cannot supply a monotonic
+  sequence should pass a timestamp; what must not happen is this
+  namespace inventing one."
+  [{:keys [api stream]} seq-fn fact]
+  (let [n (seq-fn)]
+    ((:transact! api)
+     [{:mp/kind "event"
+       :mp.event/stream (name stream)
+       :mp.event/seq n
+       :mp.event/fact (enc fact)}])
+    fact))
+
+(defn read-events
+  "Every fact on a stream, in sequence order.
+
+  Sorted here rather than trusted from the store: datom order is not a
+  guarantee any backend makes, and an audit ledger read out of order is
+  worse than no ledger."
+  [{:keys [api stream]}]
+  (->> ((:q api) [:find '?e :where
+                  ['?e :mp.event/stream (name stream)]])
+       (map first)
+       (map #((:pull api) % '[*]))
+       (sort-by :mp.event/seq)
+       (mapv #(dec* (:mp.event/fact %)))))
+
+;; ───────────────────────────── store handle ─────────────────────────────
+
+(defn store
+  "A persistence handle for one actor.
+
+  Throws when the host has not injected a usable `db-api` — the policy's
+  `:policy/fail-closed-without-host-injection true` made concrete. An
+  actor that comes up without its database must fail loudly at
+  construction, not quietly at the first write."
+  [{:keys [db-api actor]}]
+  (when-let [errs (seq (db-api-errors db-api))]
+    (throw (ex-info "marketplace.persist requires a host-injected database API"
+                    {:persist/errors errs :persist/actor actor})))
+  (when (str/blank? (str actor))
+    (throw (ex-info "marketplace.persist requires an actor name for stream scoping"
+                    {:persist/errors [{:persist.error/code :missing-actor}]})))
+  {:persist/api   db-api
+   :persist/actor (name actor)
+   :persist/memory? (true? (:memory? db-api))})
+
+(defn ctx
+  "A document context for one kind within a store."
+  [st kind id-key]
+  {:api (:persist/api st) :kind kind :id-key id-key})
+
+(defn stream-ctx
+  "An event-stream context, scoped to the actor so two actors sharing a
+  database keep separate ledgers."
+  [st stream]
+  {:api (:persist/api st)
+   :stream (str (:persist/actor st) "/" (name stream))})
+
+;; ───────────────────────── the test-only backend ─────────────────────────
+
+(defn mem-db-api
+  "An in-memory implementation of the four injected functions.
+
+  TEST ONLY. `org-database-policy.edn` says `:database/memory
+  :test-only`, and the handle it produces is stamped `:memory? true` so
+  a production readiness check can refuse it rather than discovering at
+  3am that a service has been writing to a map.
+
+  Supports exactly the two query shapes this namespace issues; it is a
+  test double for `kotobase.core`, not a datalog engine."
+  []
+  (let [a (atom {:eid 0 :entities {}})]
+    {:memory? true
+     :transact!
+     (fn [tx-data]
+       (doseq [m tx-data]
+         (let [id-attr (first (filter #(= "id" (name %)) (keys m)))
+               existing (when id-attr
+                          (ffirst (filter (fn [[_ e]] (= (get e id-attr) (get m id-attr)))
+                                          (:entities @a))))
+               eid (or existing (:eid (swap! a update :eid inc)))]
+           (swap! a assoc-in [:entities eid] (assoc m :db/id eid))))
+       tx-data)
+     ;; Exactly the two shapes this namespace issues:
+     ;;   [:find ?e   :where [?e attr <value>]]  -> entity ids
+     ;;   [:find ?id  :where [_  attr ?id]]      -> that attribute's values
+     ;; Results are tuples, as a real datalog engine returns.
+     :q
+     (fn [pattern]
+       (let [find-sym (second pattern)
+             [e-sym attr v] (last pattern)]
+         (set
+          (for [[eid ent] (:entities @a)
+                :when (if (symbol? v) (contains? ent attr) (= v (get ent attr)))]
+            [(if (= find-sym e-sym) eid (get ent attr))]))))
+     :pull (fn [eid _] (get-in @a [:entities eid]))
+     :datoms (fn [] (vals (:entities @a)))}))
