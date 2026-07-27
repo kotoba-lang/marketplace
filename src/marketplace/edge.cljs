@@ -233,6 +233,84 @@
   [picked]
   (vec (mapcat (fn [[kind id doc]] (persist/doc->tx* kind id doc)) picked)))
 
+
+;; ───────────────────────── the ledger, readable ─────────────────────────
+
+(defn read-ledger
+  "Every fact on one actor's stream, in order.
+
+  The stream name is not queried for — it is READ OFF the entity id, which
+  `persist/append-event!` builds as `mp.event/<actor>/<stream>/<ordinal>`.
+  One pattern query for `:mp.event/fact` therefore returns every event in the
+  ref, and this narrows to the stream asked for.
+
+  Sorted here rather than trusted from the store. Datom order is not a
+  guarantee any backend makes, and an audit ledger read out of order is worse
+  than no ledger — the ordinal sorts lexically by design
+  (`<15-digit ms>-<counter>-<nonce>`), so clock order survives the round trip."
+  ([client actor stream] (read-ledger client default-db actor stream))
+  ([client db actor stream]
+   (let [prefix (str "mp.event/" (name actor) "/" (name stream) "/")]
+     (-> (q-pattern client db "[nil \":mp.event/fact\" nil]")
+         (.then (fn [res]
+                  (let [rows (or (aget res "rows") (aget res "rows_edn") #js [])]
+                    (->> (array-seq rows)
+                         (keep (fn [r]
+                                 (let [e (str (or (aget r "s") (aget r "e")))
+                                       o (or (aget r "o") (aget r "v") (aget r "v_edn"))]
+                                   (when (str/starts-with? e prefix)
+                                     [(subs e (count prefix))
+                                      (persist/dec* (if (and (string? o)
+                                                             (str/starts-with? o "\""))
+                                                      (reader/read-string o)
+                                                      o))]))))
+                         (sort-by first)
+                         (mapv second)))))))))
+
+(defn fact-ref
+  "What a ledger fact is ABOUT, across actors that name it differently.
+
+  `edge/run` writes `:ref`, but an actor with its own runner may write
+  `:order-id`, `:applicant-id`, `:task-id` and so on — the order actor does.
+  Matching only on `:ref` would silently pair nothing, and an approval queue
+  that quietly shows zero open items is worse than one that errors: it reads
+  as 'nothing to do'."
+  [fact]
+  (or (:ref fact)
+      (some (fn [[k v]] (when (and v (str/ends-with? (name k) "-id")) v)) fact)))
+
+(defn escalations
+  "The approval queue: what this actor handed to a human and NOBODY HAS
+  ANSWERED YET.
+
+  Why this exists at all: every marketplace actor is built so that the
+  high-stakes moves — cancelling a sub-order, binding a payout destination,
+  releasing an escrow, issuing a seller credential, accepting an HS
+  classification — do not commit on a machine's say-so. They escalate. Those
+  escalations were being written faithfully into the ledger and there was no
+  way to READ them, which made every one of those gates a black hole: the
+  actor correctly refused to decide, and no human could see that it had.
+
+  An escalation is OPEN until a later fact on the same stream names the same
+  `:ref`. Resolved ones are counted, not listed — a queue that shows finished
+  work stops being read."
+  ([client actor] (escalations client default-db actor))
+  ([client db actor]
+   (-> (read-ledger client db actor :ledger)
+       (.then (fn [facts]
+                (let [asked (filterv #(= :approval-requested (:t %)) facts)
+                      answered (into #{} (comp (remove #(= :approval-requested (:t %)))
+                                               (keep fact-ref))
+                                     facts)
+                      open (remove #(contains? answered (fact-ref %)) asked)]
+                  {:actor (name actor)
+                   :open (mapv (fn [f] {:ref (fact-ref f)
+                                        :op (some-> (:op f) name)
+                                        :reason (some-> (:reason f) name)})
+                               open)
+                   :open-count (count open)
+                   :resolved-count (- (count asked) (count open))}))))))
+
 ;; ───────────────────────── writes ─────────────────────────
 
 (defn flush-tx!
@@ -283,6 +361,40 @@
        (.then (fn [pairs] (mapv second (sort-by first pairs)))))))
 
 ;; ───────────────────────── the fetch handler ─────────────────────────
+
+(defn ledger-routes
+  "The two read routes every marketplace actor should expose, implemented
+  once.
+
+  `GET /escalations`  what this actor handed to a human and nobody answered.
+  `GET /ledger`       the whole append-only stream.
+
+  Both are GATED. The ledger names orders, sellers, amounts and the basis of
+  every refusal; it is the audit trail, not public information. Returns nil
+  when the path is neither, so an actor's own `routes` can fall through."
+  [client request env method path actor]
+  (cond
+    (and (= method "GET") (= path "/escalations"))
+    (if-not (authorised? request env)
+      (js/Promise.resolve (json {:error "unauthorised"} 401))
+      (-> (escalations client actor) (.then #(json % 200))))
+
+    (and (= method "GET") (= path "/ledger"))
+    (if-not (authorised? request env)
+      (js/Promise.resolve (json {:error "unauthorised"} 401))
+      (-> (read-ledger client actor :ledger)
+          (.then (fn [facts]
+                   (json {:actor (name actor)
+                          :count (count facts)
+                          :facts (mapv (fn [f]
+                                         (-> f
+                                             (update :t #(some-> % name))
+                                             (update :op #(some-> % name))
+                                             (dissoc :violations)))
+                                       facts)}
+                         200)))))
+
+    :else nil))
 
 (defn serve
   "The shape every marketplace Worker's `fetch` has.
