@@ -2,32 +2,41 @@
  ;; Every dep is an existing kotoba-lang capability library this repo
  ;; COMPOSES rather than reimplements (ADR-2607264000 D2). All are
  ;; portable `.cljc` with no network I/O, so this library stays pure.
- ;; The :local/root paths resolve inside the monorepo checkout; a
- ;; standalone fork should override them with git coordinates.
+ ;; Pinned by git coordinate, not :local/root. CI checks out this repo alone,
+ ;; so a sibling path never resolves there -- the classpath failed to build
+ ;; before any test ran ("Local lib io.github.kotoba-lang/pay not found").
  :deps {;; eKYC session + evidence completion (犯収法施行規則 6条1項の10方式)
-        io.github.kotoba-lang/ekyc          {:local/root "../ekyc"}
+        io.github.kotoba-lang/ekyc          {:git/url "https://github.com/kotoba-lang/ekyc.git"
+         :git/sha "a11a46c7aa5c389a0a6799a7fc6f4584d6ad823a"}
         ;; AML screening status reduction (:clear/:review/:hold/:not-run)
-        io.github.kotoba-lang/aml           {:local/root "../aml"}
+        io.github.kotoba-lang/aml           {:git/url "https://github.com/kotoba-lang/aml.git"
+         :git/sha "985bd2147a70cb564e705c578bb6d15db72f926e"}
         ;; integer split allocation, receipts, monetization capability
-        io.github.kotoba-lang/pay           {:local/root "../pay"}
+        io.github.kotoba-lang/pay           {:git/url "https://github.com/kotoba-lang/pay.git"
+         :git/sha "6fd2874df910aefec66f4d3237887fe3372ca44b"}
         ;; GTIN-14 normalization + GS1 check digit + product/party ids
-        io.github.kotoba-lang/product-party {:local/root "../product-party"}
+        io.github.kotoba-lang/product-party {:git/url "https://github.com/kotoba-lang/product-party.git"
+         :git/sha "c450968cd70e4e5d6d1096d024d9ff455a724c1e"}
         ;; buyer-facing index/tokenize/score
-        io.github.kotoba-lang/search        {:local/root "../search"}
+        io.github.kotoba-lang/search        {:git/url "https://github.com/kotoba-lang/search.git"
+         :git/sha "11ab1f8f4b35875e3132c5bb82520bc29e5cf1df"}
         ;; order lines, totals and the status-transition table. A
         ;; marketplace order is a parent over per-seller okaimono
         ;; sub-orders, so the courier and warehouse actors consume records
         ;; they already understand.
-        io.github.kotoba-lang/okaimono      {:local/root "../okaimono"}
+        io.github.kotoba-lang/okaimono      {:git/url "https://github.com/kotoba-lang/okaimono.git"
+         :git/sha "ef60ec13b767583f3eb46c6df32e872c4e9a915e"}
         ;; mission / action+safety-class / gate / safety-stop / telemetry.
         ;; Policy, not control -- see marketplace.fulfillment.
-        io.github.kotoba-lang/robotics      {:local/root "../robotics"}
+        io.github.kotoba-lang/robotics      {:git/url "https://github.com/kotoba-lang/robotics.git"
+         :git/sha "1d1f93e3c9ac06ce475ebcfd4df1d908602792d5"}
         ;; HOST half only (`marketplace.edge`, a .cljs file the JVM test
         ;; suite never loads): q / pull / datoms / transact against
         ;; kotobase.net with a per-request CACAO. The portable .cljc core
         ;; of this library stays free of network I/O.
         io.github.kotoba-lang/kotobase-client
-        {:local/root "../kotobase-client"}}
+        {:git/url "https://github.com/kotoba-lang/kotobase-client.git"
+         :git/sha "f88a46930e4209c4346c0ef78f3795a948bf73b6"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {io.github.cognitect-labs/test-runner
