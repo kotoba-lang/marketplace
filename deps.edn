@@ -21,7 +21,13 @@
         io.github.kotoba-lang/okaimono      {:local/root "../okaimono"}
         ;; mission / action+safety-class / gate / safety-stop / telemetry.
         ;; Policy, not control -- see marketplace.fulfillment.
-        io.github.kotoba-lang/robotics      {:local/root "../robotics"}}
+        io.github.kotoba-lang/robotics      {:local/root "../robotics"}
+        ;; HOST half only (`marketplace.edge`, a .cljs file the JVM test
+        ;; suite never loads): q / pull / datoms / transact against
+        ;; kotobase.net with a per-request CACAO. The portable .cljc core
+        ;; of this library stays free of network I/O.
+        io.github.kotoba-lang/kotobase-client
+        {:local/root "../kotobase-client"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {io.github.cognitect-labs/test-runner

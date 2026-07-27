@@ -127,6 +127,24 @@
   [kind id]
   (str "mp." (name kind) "/" id))
 
+(defn doc->tx*
+  "The triples for one document, with the id given EXPLICITLY.
+
+  This exists because the host re-encodes documents it has already read
+  back out of the ref, and it knows their ids from the ENTITY ids —
+  `doc-eid` puts them there. Asking it to re-derive the id by looking up
+  the right key per kind means keeping a kind->id-key table in the host
+  that has to agree with every store, and it did not: a robot stored
+  under `:robot-id` was re-encoded under `:robot/id`, so the actor was
+  handed a robot with no id and answered `robot-unknown` about a robot
+  it had just been given. Reading the id from where it already is
+  removes that class of drift rather than fixing one instance of it."
+  [kind id m]
+  (let [e (doc-eid kind (str id))]
+    [[:db/add e :mp/kind (name kind)]
+     [:db/add e (doc-attr kind :id) (str id)]
+     [:db/add e (doc-attr kind :doc) (enc m)]]))
+
 (defn doc->tx
   "One domain map as transactable datoms — `[e a v]` TRIPLES.
 
@@ -159,11 +177,7 @@
   in a shared database — a real risk once several actors point at the
   same D1 binding."
   [kind id-key m]
-  (let [id (str (get m id-key))
-        e (doc-eid kind id)]
-    [[:db/add e :mp/kind (name kind)]
-     [:db/add e (doc-attr kind :id) id]
-     [:db/add e (doc-attr kind :doc) (enc m)]]))
+  (doc->tx* kind (str (get m id-key)) m))
 
 (defn tx->doc
   "Reverse `doc->tx` for one pulled entity. nil when the entity carries
@@ -196,20 +210,37 @@
 
 ;; ───────────────────────── append-only event log ─────────────────────────
 
+(defn ordinal
+  "Normalise what `seq-fn` returned into a sortable ordinal string.
+
+  A NUMBER is zero-padded, because the store stringifies values on the
+  way in and an integer ordinal would come back as \"10\" < \"9\" and read
+  the ledger out of order.
+
+  A STRING is taken AS IS. This is the case that matters in production:
+  the entity id is derived from the ordinal, so two hosts that both
+  count from 1 — two Worker isolates, say — write the same entity id and
+  the second append silently OVERWRITES the first. An append-only ledger
+  that loses entries is worse than no ledger, so a host that cannot be
+  sure it is the only writer passes a string that carries its own
+  uniqueness (`marketplace.edge/ordinal-fn` builds one from the clock, a
+  within-request counter and a per-isolate nonce). Ordering across
+  writers is then by clock, which is the best a multi-writer host can
+  honestly claim; what it must never do is drop a fact."
+  [n]
+  (if (string? n)
+    n
+    (let [s (str n)] (str (subs "000000000000" 0 (max 0 (- 12 (count s)))) s))))
+
 (defn append-event!
   "Append one immutable fact to an actor's ledger.
 
   `seq-fn` supplies the ordinal — injected rather than derived from a
   count, because a count is a read-modify-write and two concurrent
-  appends would collide on it. A host that cannot supply a monotonic
-  sequence should pass a timestamp; what must not happen is this
-  namespace inventing one."
+  appends would collide on it. See `ordinal` for what it may return and
+  why a multi-writer host must return a string."
   [{:keys [api stream]} seq-fn fact]
-  (let [n (seq-fn)
-        ;; Zero-padded, because the store stringifies values on the way
-        ;; in: an integer ordinal would come back as "10" < "9" and read
-        ;; the ledger out of order.
-        ord (let [s (str n)] (str (subs "000000000000" 0 (max 0 (- 12 (count s)))) s))
+  (let [ord (ordinal (seq-fn))
         e (str "mp.event/" (name stream) "/" ord)]
     ((:transact! api)
      [[:db/add e :mp/kind "event"]

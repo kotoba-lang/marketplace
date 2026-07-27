@@ -178,3 +178,50 @@
     (is (false? (:persist/memory? (p/store {:db-api (p/recording-db-api)
                                             :actor "x"}))))
     (is (true? (:persist/memory? (p/store {:db-api (p/mem-db-api) :actor "x"}))))))
+
+;; ─────────── two writers must not overwrite each other's facts ───────────
+
+(deftest two-hosts-that-both-count-from-one-lose-facts
+  (testing "the failure this cost us in production: the entity id is derived
+            from the ordinal, so two Worker isolates that each start a fresh
+            counter write the SAME entity id and the second append silently
+            replaces the first. Reproduced here so it cannot come back."
+    (let [s (st)
+          sc (p/stream-ctx s :ledger)
+          isolate-a (let [n (atom 0)] #(swap! n inc))
+          isolate-b (let [n (atom 0)] #(swap! n inc))]
+      (p/append-event! sc isolate-a {:t :a1})
+      (p/append-event! sc isolate-b {:t :b1})
+      (is (= [{:t :b1}] (p/read-events sc))
+          "one fact where two were appended -- this is the bug, asserted"))))
+
+(deftest a-string-ordinal-keeps-both-writers-facts
+  (testing "what the fix is: the host returns an ordinal carrying its own
+            uniqueness, so neither append is lost"
+    (let [s (st)
+          sc (p/stream-ctx s :ledger)
+          host (fn [nonce] (let [n (atom 0)]
+                             #(str "000000000001700-" (swap! n inc) "-" nonce)))
+          a (host "aaa") b (host "bbb")]
+      (p/append-event! sc a {:t :a1})
+      (p/append-event! sc b {:t :b1})
+      (p/append-event! sc a {:t :a2})
+      (is (= 3 (count (p/read-events sc))) "nothing dropped")
+      (is (= #{{:t :a1} {:t :b1} {:t :a2}} (set (p/read-events sc)))))))
+
+(deftest a-string-ordinal-is-taken-verbatim-and-a-number-is-padded
+  (is (= "abc" (p/ordinal "abc")))
+  (is (= "000000000009" (p/ordinal 9)))
+  (is (= "000000000010" (p/ordinal 10)))
+  (testing "padding is what makes numeric ordinals sort as numbers do"
+    (is (neg? (compare (p/ordinal 9) (p/ordinal 10))))))
+
+(deftest clock-ordered-string-ordinals-read-back-in-clock-order
+  (let [s (st)
+        sc (p/stream-ctx s :ledger)
+        at (fn [ms i] (str (subs "000000000000000" 0 (- 15 (count (str ms)))) ms
+                           "-" i "-nonce"))]
+    (p/append-event! sc (constantly (at 1700000000002 1)) {:t :second})
+    (p/append-event! sc (constantly (at 1700000000001 1)) {:t :first})
+    (p/append-event! sc (constantly (at 1700000000003 1)) {:t :third})
+    (is (= [:first :second :third] (mapv :t (p/read-events sc))))))
