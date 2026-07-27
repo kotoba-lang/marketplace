@@ -158,7 +158,8 @@
         (is (= 3 (count (p/recorded api)))
             "one document is three triples: kind, id, doc blob")
         (is (every? vector? (p/recorded api))
-            "triples, not entity maps — what kotobase-peer actually accepts")))))
+            "assertions, not entity maps — the form every hop accepts")
+        (is (every? #(= :db/add (first %)) (p/recorded api)))))))
 
 (deftest a-recording-api-starts-from-a-loaded-snapshot
   (let [pre (p/recording-db-api)

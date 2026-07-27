@@ -17,15 +17,30 @@
   and requires no storage library at all:
 
   ```clojure
-  {:transact! (fn [tx-data] ...)   ; kotobase.core/transact! partial'd on db
-   :q         (fn [pattern] ...)   ; kotobase.core/q
+  {:transact! (fn [tx-data] ...)
+   :q         (fn [pattern] ...)
    :pull      (fn [eid pattern] ...)
    :datoms    (fn [] ...)}
   ```
 
-  A production host partials these onto an open `kotobase.core`
-  database; a test supplies `mem-db-api`. Nothing here can reach a
-  network, hold a credential, or choose a tenant.
+  ## What the host actually wires these to, stated accurately
+
+  These are named after `kotobase.core`'s verbs, and an earlier version
+  of this docstring called them \"the four kotobase.core operations\" —
+  which read as a claim this namespace could not make. The host decides
+  what they are, and there is more than one honest answer:
+
+    - `kotoba-lang/kotobase-client` against kotobase.net — real
+      `q`/`pull`/`transact` with a per-request CACAO. Promise-based, so
+      the host prefetches reads and flushes writes around a synchronous
+      actor run (see `recording-db-api`). This is what
+      `cloud-itonami-marketplace-order`'s Worker does.
+    - `kotobase.core` partial'd onto an open database, in a host that
+      has one.
+    - `mem-db-api`, in tests.
+
+  Nothing here can reach a network, hold a credential, or choose a
+  tenant, whichever of those the host picks.
 
   ## Fail closed
 
@@ -115,11 +130,16 @@
 (defn doc->tx
   "One domain map as transactable datoms — `[e a v]` TRIPLES.
 
-  Triples, not entity maps, because that is what the store actually
-  accepts: `kotobase-peer` takes `{:s :p :o}`, `[:db/add e a v]` or
-  `[e a v]` and throws \"unrecognized tx-data item\" on anything else.
-  An entity-map shape worked against the in-memory test double and
-  failed on the first real transact, which is exactly the kind of gap a
+  `[:db/add e a v]` assertions, because that is the form every layer in
+  this stack names explicitly. `kotobase-peer` takes `{:s :p :o}`,
+  `[:db/add e a v]` or a bare `[e a v]`; net-kotobase's edge validator
+  passes list forms straight through with the comment \"skip
+  [:db/add e a v] list forms -- pod validates those\". A bare triple is
+  accepted by the peer but is not what the edge documents, so the
+  four-element form is the one that survives every hop.
+
+  An entity-map shape passed every test against the in-memory double and
+  failed on the first real transact — exactly the kind of gap a
   memory-only backend hides.
 
   Two attributes: the id (what `get-doc` looks up) and the whole
@@ -141,9 +161,9 @@
   [kind id-key m]
   (let [id (str (get m id-key))
         e (doc-eid kind id)]
-    [[e :mp/kind (name kind)]
-     [e (doc-attr kind :id) id]
-     [e (doc-attr kind :doc) (enc m)]]))
+    [[:db/add e :mp/kind (name kind)]
+     [:db/add e (doc-attr kind :id) id]
+     [:db/add e (doc-attr kind :doc) (enc m)]]))
 
 (defn tx->doc
   "Reverse `doc->tx` for one pulled entity. nil when the entity carries
@@ -192,10 +212,10 @@
         ord (let [s (str n)] (str (subs "000000000000" 0 (max 0 (- 12 (count s)))) s))
         e (str "mp.event/" (name stream) "/" ord)]
     ((:transact! api)
-     [[e :mp/kind "event"]
-      [e :mp.event/stream (name stream)]
-      [e :mp.event/seq ord]
-      [e :mp.event/fact (enc fact)]])
+     [[:db/add e :mp/kind "event"]
+      [:db/add e :mp.event/stream (name stream)]
+      [:db/add e :mp.event/seq ord]
+      [:db/add e :mp.event/fact (enc fact)]])
     fact))
 
 (defn read-events
@@ -254,8 +274,12 @@
   a production readiness check can refuse it rather than discovering at
   3am that a service has been writing to a map.
 
-  Supports exactly the two query shapes this namespace issues; it is a
-  test double for `kotobase.core`, not a datalog engine."
+  Supports exactly the two query shapes this namespace issues, and
+  NOTHING else. It is a test double, not a datalog engine: a query it
+  has not been taught returns a wrong answer rather than an error. Any
+  code that needs real datalog must go through a host wired to a real
+  store — `kotobase-client`'s `q` or `kotobase.core/q` — and must not
+  reach for this."
   []
   (let [a (atom {:eid 0 :entities {}})]
     {:memory? true
