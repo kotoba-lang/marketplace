@@ -144,58 +144,87 @@
 
 ;; ───────────────────────── reads ─────────────────────────
 
-(defn- datoms->docs
-  "Fold a `datomic.datoms` response into `{kind {id doc}}`.
+(defn- rows->docs
+  "Fold a `datomic.q` response into `[[id doc] ..]` for one kind.
 
-  Entity ids are deterministic (`persist/doc-eid` = `mp.<kind>/<id>`),
-  so the kind and the id come straight off `:e` and the document comes
-  off the one `:mp.<kind>/doc` cell."
-  [res]
-  (reduce
-   (fn [acc d]
-     (let [e (str (aget d "e"))
-           a (str (aget d "a"))
-           [_ kind id] (re-matches #"^mp\.([^/]+)/(.+)$" e)]
-       (if (and kind (= a (str ":mp." kind "/doc")))
-         (assoc-in acc [kind id]
-                   (persist/dec* (reader/read-string (str (aget d "v_edn")))))
-         acc)))
-   {}
-   (array-seq (or (aget res "datoms") #js []))))
+  Rows come back `{s p o}` — the pattern engine's own shape, the same
+  positions as a datom's `{e a v}` (`kotobase-peer.core/datoms` says so
+  explicitly). The id is taken from the SUBJECT, where `persist/doc-eid`
+  put it, so nothing has to look up a per-kind id attribute."
+  [kind res]
+  (let [rows (or (aget res "rows") (aget res "rows_edn") #js [])
+        pre (str "mp." (name kind) "/")]
+    (vec
+     (keep (fn [r]
+             (let [s (str (or (aget r "s") (aget r "e")))
+                   o (or (aget r "o") (aget r "v") (aget r "v_edn"))]
+               (when (str/starts-with? s pre)
+                 [(subs s (count pre))
+                  (persist/dec* (if (and (string? o) (str/starts-with? o "\""))
+                                  (reader/read-string o)
+                                  o))])))
+           (array-seq rows)))))
 
-(defn load-graph
-  "One `:eavt` scan, folded into every document in the shared ref.
+(defn q-pattern
+  "Run one `[s p o]` pattern against the ref.
 
-  This is a whole-graph read and says so. The bounded alternatives —
-  `datomic.q` with a pattern, or `datomic.fold` — do not work on the
-  apex today: `q` answers `rows: []` and `fold` answers
-  `MethodNotImplemented` (measured 2026-07-27 against kotobase.net).
-  When one of them works, only this function changes; `select` below
-  already narrows to what the request named, so nothing downstream
-  assumes the whole graph was ever in hand."
-  ([client] (load-graph client default-db))
-  ([client db] (-> (kb/datoms client db ":eavt") (.then datoms->docs))))
+  `datomic.q` on the apex takes a triple PATTERN with `nil` wildcards —
+  NOT a `[:find .. :where ..]` datalog query. That distinction cost this
+  actor a whole-graph read for a day: a datalog query sent here parses
+  as a six-element vector, matches nothing, and returns `rows: []`,
+  which is indistinguishable from an empty database. The two transports
+  genuinely differ — `:direct-v1` reads the string as datalog — so this
+  is a fact about the apex, not a bug to route around.
 
-(defn select
-  "Narrow a loaded graph to the documents a request names.
+  Every read is SIGNED. Skipping the CACAO mint (`:public? true`) looked
+  like a saving of one signature per prefetched kind and is simply
+  refused — the apex answers 401, because a read of a key-derived graph
+  is still a read of someone's graph. Measured, not assumed."
+  [client db pattern]
+  (kb/q client (or db default-db) pattern))
 
-  `wants` is `{kind ids}` where ids is a seq of ids or `:all`. Returns
-  `[kind id doc]` triples — the id comes along because it is what
-  `seed-tx` needs, and it is already known from the entity id rather
-  than needing a per-kind lookup table in the host.
+(defn load-kind
+  "Every document of one kind. ONE query, bounded by the kind's own
+  attribute rather than by the size of the graph."
+  ([client kind] (load-kind client default-db kind))
+  ([client db kind]
+   (-> (q-pattern client db (str "[nil \":mp." (name kind) "/doc\" nil]"))
+       (.then #(rows->docs kind %)))))
+
+(defn load-one
+  "One document by id. ONE query, bounded to a single subject."
+  ([client kind id] (load-one client default-db kind id))
+  ([client db kind id]
+   (-> (q-pattern client db
+                  (str "[\"" (persist/doc-eid kind id) "\" \":mp." (name kind) "/doc\" nil]"))
+       (.then #(rows->docs kind %)))))
+
+(defn prefetch
+  "Load exactly the documents a request names, and nothing else.
+
+  `wants` is `{kind ids}` where ids is a seq or `:all`. A named id is one
+  single-subject query; `:all` is one whole-kind query. Both are bounded
+  reads — the previous implementation scanned the entire ref on every
+  request and folded it in memory, which worked and would not have kept
+  working.
 
   Missing documents are simply absent. The actor's governor is what
   decides that an absent seller or offer is a refusal, and it must keep
   deciding that rather than having the host pre-empt it with an error."
-  [docs wants]
-  (vec
-   (for [[kind ids] wants
-         :let [by-id (get docs (name kind) {})]
-         [id doc] (if (= :all ids)
-                    by-id
-                    (keep (fn [i] (when-let [d (get by-id (str i))] [(str i) d]))
-                          (distinct ids)))]
-     [kind id doc])))
+  [client db wants]
+  (-> (js/Promise.all
+       (clj->js
+        (for [[kind ids] wants
+              :let [db (or db default-db)]
+              p (if (= :all ids)
+                  [(-> (load-kind client db kind)
+                       (.then (fn [pairs] (mapv (fn [[id doc]] [kind id doc]) pairs))))]
+                  (map (fn [id]
+                         (-> (load-one client db kind id)
+                             (.then (fn [pairs] (mapv (fn [[i doc]] [kind i doc]) pairs)))))
+                       (distinct (remove nil? ids))))]
+          p)))
+      (.then (fn [results] (vec (mapcat identity (array-seq results)))))))
 
 (defn seed-tx
   "Turn selected documents into the tx-data `persist`'s recording api
@@ -231,9 +260,9 @@
   number of triples that reached the ref."
   [{:keys [client db wants store-fn]} f]
   (let [db (or db default-db)]
-    (-> (load-graph client db)
-        (.then (fn [docs]
-                 (let [api (persist/recording-db-api (seed-tx (select docs wants)))
+    (-> (prefetch client db wants)
+        (.then (fn [picked]
+                 (let [api (persist/recording-db-api (seed-tx picked))
                        st (store-fn {:db-api api :seq-fn (ordinal-fn)})
                        result (f st)
                        written (persist/recorded api)]
@@ -244,65 +273,14 @@
   "One document straight out of the ref, without running an actor."
   ([client kind id] (read-doc client default-db kind id))
   ([client db kind id]
-   (-> (load-graph client db) (.then #(get-in % [(name kind) (str id)])))))
+   (-> (load-one client db kind id) (.then (fn [pairs] (second (first pairs)))))))
 
 (defn read-all
   "Every document of a kind, id-sorted for determinism."
   ([client kind] (read-all client default-db kind))
   ([client db kind]
-   (-> (load-graph client db)
-       (.then (fn [docs] (->> (get docs (name kind) {}) (sort-by key) (mapv val)))))))
-
-
-;; ───────────────────────── running an actor ─────────────────────────
-
-(defn run
-  "One synchronous actor pass, the shape every marketplace actor shares.
-
-  advise -> govern -> phase-gate -> commit, escalate or hold. The
-  functions come from the actor because the JUDGEMENT is the actor's;
-  what is shared is only the order the four steps happen in and the
-  rule that a held or escalated proposal still writes a ledger fact.
-  That last part is why this is here rather than copied: an actor that
-  forgets to record its own refusal has an audit trail that only
-  contains successes.
-
-  `ops` keys:
-    :advise      (fn [st request]        ) -> proposal
-    :check       (fn [request ctx p st]  ) -> verdict
-    :disposition (fn [verdict]           ) -> base disposition
-    :gate        (fn [phase request base]) -> {:disposition :reason}
-    :commit!     (fn [st proposal request])
-    :ledger!     (fn [st fact]           )
-    :hold-fact   (fn [request ctx verdict]) -> fact"
-  [{:keys [advise check disposition gate commit! ledger! hold-fact]} st context request]
-  (let [proposal (advise st request)
-        verdict (check request context proposal st)
-        base (disposition verdict)
-        {d :disposition reason :reason} (gate (:phase context) request base)]
-    (case d
-      :commit
-      (do (commit! st proposal request)
-          (ledger! st {:t :committed :op (:op request) :ref (:ref request)})
-          {:disposition :commit :verdict verdict})
-
-      :escalate
-      (do (ledger! st {:t :approval-requested :op (:op request) :ref (:ref request)
-                       :reason (or reason :high-stakes)})
-          {:disposition :escalate :verdict verdict :reason reason})
-
-      (do (ledger! st (hold-fact request context verdict))
-          {:disposition :hold :verdict verdict :reason reason}))))
-
-(defn outcome
-  "The JSON body every actor answers a write with: what happened and,
-  when it did not happen, the RULES that stopped it — never a prose
-  apology a caller has to parse."
-  [ref out]
-  (cond-> {:ref ref
-           :disposition (name (:disposition out))
-           :violations (mapv (comp name :rule) (get-in out [:verdict :violations]))}
-    (:reason out) (assoc :reason (str (:reason out)))))
+   (-> (load-kind client db kind)
+       (.then (fn [pairs] (mapv second (sort-by first pairs)))))))
 
 ;; ───────────────────────── the fetch handler ─────────────────────────
 
