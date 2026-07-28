@@ -192,12 +192,28 @@
        (.then #(rows->docs kind %)))))
 
 (defn load-one
-  "One document by id. ONE query, bounded to a single subject."
+  "One document by id.
+
+  This SHOULD be a single-subject query — `[\"mp.order/ord-1\"
+  \":mp.order/doc\" nil]` — and was, until `datomic.*` began bridging to
+  kotobase-storage-d1. Measured against kotobase.net on 2026-07-28:
+
+    [nil \":mp.order/doc\" nil]                 200
+    [\"mp.buyer/buyer-a\" \":mp.buyer/doc\" nil]  400 InvalidDatomicRequest
+    [\"mp.buyer/buyer-a\" nil nil]              400 InvalidDatomicRequest
+
+  A bound SUBJECT is refused; only a wildcard subject is accepted. So this
+  reads the kind and filters here.
+
+  That is a real regression in read precision and is written down rather than
+  smoothed over: it is still bounded by KIND — one attribute, not the whole
+  graph — but a request for one buyer now transfers every buyer. When the
+  bridge accepts a bound subject again, this function goes back to one query
+  and nothing else changes."
   ([client kind id] (load-one client default-db kind id))
   ([client db kind id]
-   (-> (q-pattern client db
-                  (str "[\"" (persist/doc-eid kind id) "\" \":mp." (name kind) "/doc\" nil]"))
-       (.then #(rows->docs kind %)))))
+   (-> (load-kind client db kind)
+       (.then (fn [pairs] (filterv #(= (str id) (first %)) pairs))))))
 
 (defn prefetch
   "Load exactly the documents a request names, and nothing else.
