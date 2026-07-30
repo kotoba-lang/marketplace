@@ -3,6 +3,15 @@
 **Federated marketplace protocol primitives — pure `.cljc`, no network
 I/O, no clock, no key custody.**
 
+**Maturity**: :implemented — 12 namespaces with a green suite (169 tests
+/ 719 assertions), consumed by 13 sibling repos. Implemented means the
+contracts exist, are tested and are depended on; it does **not** mean a
+production transaction has settled through them. Nothing here reaches a
+network, and the `acceptance` rail is connected to no PSP. Stated
+explicitly because a maturity scan reading prose would otherwise take
+*landed cost* (an incoterms phrase in `crossborder`) for a shipping
+status.
+
 A [kotoba-lang](https://github.com/kotoba-lang) capability library that
 composes the workspace's existing commerce primitives into the five
 contracts a *multi-seller* marketplace needs and a single-shop back
