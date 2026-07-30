@@ -55,6 +55,7 @@ marketplace.seller       ; portable seller credential + admission + portability 
 marketplace.catalog      ; cross-seller offers on one canonical product + buy box
 marketplace.listing      ; listing admission, restricted goods, search projection
 marketplace.settlement   ; multi-seller split, payout destinations, escrow
+marketplace.acceptance   ; コード決済 — PSP-attested capture, refunds, custody flag
 marketplace.crossborder  ; landed cost, HS proposals, dispute intake
 ```
 
@@ -93,6 +94,33 @@ commission rates and basket shapes:
 ```
 
 Rounding dust goes to the **seller**, never the operator.
+
+## Code payment (コード決済) is acceptance, not a payout rail
+
+`settlement` describes money going OUT to sellers. A QR / barcode code
+payment comes IN from the buyer, and it is not a fourth
+`settlement/payout-rails` entry: a code-payment PSP settles to ONE
+merchant's bank account, so it can never be a per-seller destination.
+`acceptance/payout-leg-rail` states the consequence — the seller's share
+of a code payment travels on `:bank-transfer`.
+
+Two facts this namespace refuses to let a caller forget:
+
+- **A buyer's completion screen is not evidence of payment.** `capture`
+  accepts only a webhook the PSP sent or the PSP's answer to a query, and
+  refuses a buyer-presented claim by name (`:buyer-presented-evidence`).
+- **This rail is custodial and `:x402` is not.** A PSP cannot split at
+  pay time, so the seller's money passes through the operator —
+  `:accept/operator-custodial? true` on every request. That is 収納代行
+  territory under 資金決済法; this library states the flag, it does not
+  decide whether a deployment may proceed.
+
+A `:mpm-static` code carries no amount — the buyer types it — so a
+shortfall is *captured and reported* (`:short`), never released to
+settlement. Overpayment is reported too, rather than pocketed. There is
+no PSP client here and there will not be one: a vendor-specific API
+client belongs in a vendor repo, so `:accept/psp` is a name the
+deployment supplies.
 
 ## What this library refuses to know
 
