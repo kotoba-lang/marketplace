@@ -282,6 +282,26 @@
            :accept/psp-transaction (:psp/transaction-id a)
            :accept/attested-by    (:psp/source a))))
 
+(defn refunded-minor
+  "How much of this capture has been given back. Zero when nothing has
+  been -- and zero is the only figure that may be defaulted here, because
+  'no refund has been recorded' and 'no money was refunded' are the same
+  statement."
+  [r]
+  (or (:accept/refunded-minor r) 0))
+
+(defn net-captured-minor
+  "What the operator still holds from this capture: captured minus
+  refunded. nil when nothing was captured.
+
+  This, not `:accept/captured-minor`, is what a settlement may stand on.
+  A buyer who was refunded and whose order then released in full would
+  have been paid twice out of the operator's money -- see
+  `settlement-status`, which is the single place that arithmetic lives."
+  [r]
+  (when-let [got (:accept/captured-minor r)]
+    (- got (refunded-minor r))))
+
 (defn settlement-status
   "What arrived against what was asked, in `settleops.rail/reconcile`'s
   vocabulary so the two layers describe money with the same four words:
@@ -289,10 +309,15 @@
 
   `:over` is reported rather than pocketed. On a `:mpm-static` code an
   overpayment is a buyer who typed one zero too many, and treating it as
-  'settled, with extra' keeps money that must be refunded."
+  'settled, with extra' keeps money that must be refunded.
+
+  REFUNDS COUNT AGAINST THE CAPTURE. `:captured` is the net figure, so a
+  partially refunded order reads `:short` and a fully refunded one leaves
+  `:captured` state entirely and reads `:missing`. Comparing the gross
+  capture would let a refunded buyer's order settle in full."
   [r]
   (let [want (:accept/expected-minor r)
-        got  (:accept/captured-minor r)]
+        got  (net-captured-minor r)]
     {:order    (:accept/order r)
      :expected want
      :captured got
@@ -327,22 +352,62 @@
   mandatory — nil without it.
 
   Refuses (nil) an unattributed refund: `requested-by` must name someone,
-  the same discipline `settlement/resolve-dispute` applies to disputes."
+  the same discipline `settlement/resolve-dispute` applies to disputes.
+
+  The ceiling is what is STILL HELD (`net-captured-minor`), not the gross
+  capture. Two refunds of half each are legitimate; two refunds of the
+  full amount are the same money given back twice, and checking against
+  the gross figure would allow it."
   [r {:keys [amount-minor reason requested-by requested-at]}]
-  (when (and (= :captured (:accept/state r))
-             (not (str/blank? (str (:accept/psp-transaction r))))
-             (not (str/blank? (str requested-by)))
-             (integer? amount-minor)
-             (pos? amount-minor)
-             (<= amount-minor (:accept/captured-minor r 0)))
-    {:refund/rail                 (:accept/rail r)
-     :refund/psp                  (:accept/psp r)
-     :refund/original-transaction (:accept/psp-transaction r)
-     :refund/order                (:accept/order r)
-     :refund/amount-minor         amount-minor
-     :refund/currency             (:accept/currency r)
-     :refund/partial?             (< amount-minor (:accept/captured-minor r))
-     :refund/via                  :psp-original-transaction
-     :refund/reason               reason
-     :refund/requested-by         requested-by
-     :refund/requested-at         requested-at}))
+  (let [net (or (net-captured-minor r) 0)]
+    (when (and (= :captured (:accept/state r))
+               (not (str/blank? (str (:accept/psp-transaction r))))
+               (not (str/blank? (str requested-by)))
+               (integer? amount-minor)
+               (pos? amount-minor)
+               (<= amount-minor net))
+      {:refund/rail                 (:accept/rail r)
+       :refund/psp                  (:accept/psp r)
+       :refund/original-transaction (:accept/psp-transaction r)
+       :refund/order                (:accept/order r)
+       :refund/amount-minor         amount-minor
+       :refund/currency             (:accept/currency r)
+       ;; Partial relative to what is still held: a refund that closes out
+       ;; the remainder is not partial, however many came before it.
+       :refund/partial?             (< amount-minor net)
+       :refund/already-refunded-minor (refunded-minor r)
+       :refund/via                  :psp-original-transaction
+       :refund/reason               reason
+       :refund/requested-by         requested-by
+       :refund/requested-at         requested-at})))
+
+(defn apply-refund
+  "Book a refund against the capture it came from.
+
+  Accumulates `:accept/refunded-minor` and moves the record to
+  `:refunded` once nothing is left held -- through `advance`, so the
+  transition table stays the only thing that decides which states are
+  reachable. nil when `instruction` is not a refund for this record, or
+  when it would take the total past the capture.
+
+  Booking it here rather than in a caller's own tally is the point: the
+  funds gate reads `settlement-status`, `settlement-status` reads
+  `net-captured-minor`, and this is the only function that moves that
+  number. A refund recorded anywhere else would be invisible to the gate."
+  [r instruction]
+  (let [amount (:refund/amount-minor instruction)
+        net    (or (net-captured-minor r) 0)]
+    (when (and (= :captured (:accept/state r))
+               (= (:refund/order instruction) (:accept/order r))
+               (= (:refund/original-transaction instruction)
+                  (:accept/psp-transaction r))
+               (integer? amount)
+               (pos? amount)
+               (<= amount net))
+      (let [total (+ (refunded-minor r) amount)
+            booked (assoc r
+                          :accept/refunded-minor total
+                          :accept/last-refund-at (:refund/requested-at instruction))]
+        (if (= total (:accept/captured-minor r))
+          (advance booked :refunded)
+          booked)))))

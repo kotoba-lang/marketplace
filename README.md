@@ -131,6 +131,30 @@ no PSP client here and there will not be one: a vendor-specific API
 client belongs in a vendor repo, so `:accept/psp` is a name the
 deployment supplies.
 
+**Refunds come off what a settlement may stand on.** `net-captured-minor`
+is captured minus refunded, and `settlement-status` reads that rather than
+the gross capture — so a partially refunded order reads `:short` and a
+fully refunded one reads `:missing`. Comparing the gross figure would let
+a refunded buyer's order settle in full, paying sellers twice out of the
+operator's money. `apply-refund` is the only function that moves the
+refunded total, and `refund-instruction`'s ceiling is what is *still
+held*: two refunds of half each are legitimate, two of the full amount are
+the same money given back twice.
+
+## Runtimes
+
+The `.cljc` core runs on both, and the suite is the same suite:
+
+```bash
+clojure -M:test            # JVM — 175 tests, 747 assertions
+npm install && npm run test:cljs   # ClojureScript on Node — same 175 / 747
+```
+
+CLAUDE.md's runtime priority puts ClojureScript above the JVM, so a
+library asserting portability should be able to show it. `marketplace.edge`
+is the host half (kotobase over the network) and is not exercised by
+either.
+
 ## What this library refuses to know
 
 - **Duty rates.** No tariff table ships here. Rates are operator-supplied

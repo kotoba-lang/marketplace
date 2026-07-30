@@ -229,3 +229,77 @@
     (testing "a partial refund is marked as one"
       (is (true? (:refund/partial? (accept/refund-instruction
                                     c {:amount-minor 500 :requested-by "jun"})))))))
+
+;; ───────────────────────── refund accounting ─────────────────────────
+
+(deftest a-refund-comes-off-what-the-settlement-may-stand-on
+  (testing "a refunded buyer whose order then settles in full has been paid
+            twice out of the operator's money"
+    (let [c (accept/capture (req) (att))
+          r (accept/refund-instruction c {:amount-minor 38500 :requested-by "jun"
+                                          :requested-at "2026-08-01T00:00:00Z"})
+          after (accept/apply-refund c r)]
+      (is (= 38500 (accept/refunded-minor after)))
+      (is (= 0 (accept/net-captured-minor after)))
+      (is (= :refunded (:accept/state after))
+          "a fully refunded capture leaves :captured through the transition table")
+      (is (= :missing (:status (accept/settlement-status after))))
+      (is (false? (accept/releasable-to-settlement? after))))))
+
+(deftest a-partial-refund-reads-short-not-settled
+  (let [c (accept/capture (req) (att))
+        r (accept/refund-instruction c {:amount-minor 500 :requested-by "jun"})
+        after (accept/apply-refund c r)]
+    (is (= :captured (:accept/state after)) "still held, just not all of it")
+    (is (= 38000 (accept/net-captured-minor after)))
+    (is (= {:order "order-1" :expected 38500 :captured 38000 :status :short}
+           (accept/settlement-status after)))
+    (is (false? (accept/releasable-to-settlement? after)))))
+
+(deftest refunds-accumulate-and-cannot-exceed-the-capture
+  (let [c (accept/capture (req) (att))
+        half (accept/refund-instruction c {:amount-minor 19250 :requested-by "jun"})
+        once (accept/apply-refund c half)]
+    (testing "two halves are legitimate and the second closes it out"
+      (is (= 19250 (accept/refunded-minor once)))
+      (let [second-half (accept/refund-instruction once {:amount-minor 19250
+                                                         :requested-by "jun"})]
+        (is (false? (:refund/partial? second-half))
+            "a refund that closes out the remainder is not partial")
+        (is (= 19250 (:refund/already-refunded-minor second-half)))
+        (let [twice (accept/apply-refund once second-half)]
+          (is (= 38500 (accept/refunded-minor twice)))
+          (is (= :refunded (:accept/state twice))))))
+    (testing "but the same full amount twice is the same money given back twice"
+      (is (nil? (accept/refund-instruction once {:amount-minor 38500
+                                                 :requested-by "jun"}))
+          "the ceiling is what is still held, not the gross capture")
+      (is (nil? (accept/apply-refund once (assoc half :refund/amount-minor 38500)))))))
+
+(deftest a-fully-refunded-capture-refuses-further-refunds
+  (let [c (accept/capture (req) (att))
+        full (accept/refund-instruction c {:amount-minor 38500 :requested-by "jun"})
+        after (accept/apply-refund c full)]
+    (is (nil? (accept/refund-instruction after {:amount-minor 1 :requested-by "jun"})))
+    (is (nil? (accept/apply-refund after full)))))
+
+(deftest a-refund-for-a-different-capture-is-not-booked-here
+  (let [c (accept/capture (req) (att))
+        r (accept/refund-instruction c {:amount-minor 100 :requested-by "jun"})]
+    (testing "wrong order"
+      (is (nil? (accept/apply-refund c (assoc r :refund/order "order-2")))))
+    (testing "wrong PSP transaction — the same order can have more than one"
+      (is (nil? (accept/apply-refund c (assoc r :refund/original-transaction "psp-tx-9")))))
+    (testing "a nonsense amount"
+      (is (nil? (accept/apply-refund c (assoc r :refund/amount-minor 0))))
+      (is (nil? (accept/apply-refund c (assoc r :refund/amount-minor -100))))
+      (is (nil? (accept/apply-refund c (assoc r :refund/amount-minor 100.5)))))))
+
+(deftest an-unrefunded-capture-reports-zero-not-nil
+  (let [c (accept/capture (req) (att))]
+    (is (= 0 (accept/refunded-minor c)))
+    (is (= 38500 (accept/net-captured-minor c)))
+    (is (= :settled (:status (accept/settlement-status c)))))
+  (testing "and a capture that never happened has no net figure to report"
+    (is (nil? (accept/net-captured-minor (req))))
+    (is (= :missing (:status (accept/settlement-status (req)))))))
