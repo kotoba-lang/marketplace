@@ -1,0 +1,11 @@
+{
+  "private": true,
+  "name": "marketplace",
+  "comment": "shadow-cljs runs the portable .cljc test suite under a ClojureScript host (see shadow-cljs.edn). The library itself has no npm runtime dependency.",
+  "scripts": {
+    "test:cljs": "shadow-cljs compile test && node out/node-tests.js"
+  },
+  "devDependencies": {
+    "shadow-cljs": "^2.28.20"
+  }
+}

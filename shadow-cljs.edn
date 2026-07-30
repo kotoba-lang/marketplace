@@ -1,0 +1,18 @@
+;; The portable `.cljc` suite under a real ClojureScript host.
+;;
+;; CLAUDE.md's runtime priority puts ClojureScript above the JVM, and every
+;; namespace in this library except `marketplace.edge` is `.cljc` -- but for
+;; a while the only thing that ever ran the suite was `clojure -M:test` on
+;; the JVM, so "portable" was an assertion rather than a fact. This build
+;; makes it checkable: `npm run test:cljs`.
+;;
+;; :node-test discovers `*-test` namespaces from :test-paths. `marketplace.edge`
+;; is deliberately not exercised here -- it is the host half (kotobase over
+;; the network) and has no test namespace to discover.
+{:deps {:aliases [:cljs-test]}
+ :builds
+ {:test
+  {:target    :node-test
+   :output-to "out/node-tests.js"
+   :ns-regexp "-test$"
+   :compiler-options {:output-feature-set :es2020}}}}
