@@ -146,14 +146,16 @@ the same money given back twice.
 The `.cljc` core runs on both, and the suite is the same suite:
 
 ```bash
-clojure -M:test            # JVM — 175 tests, 747 assertions
-npm install && npm run test:cljs   # ClojureScript on Node — same 175 / 747
+clojure -M:test            # JVM — the portable .cljc core
+npm install && npm run test:cljs   # ClojureScript on Node — the same core
+                                   # PLUS the host half (marketplace.edge)
 ```
 
 CLAUDE.md's runtime priority puts ClojureScript above the JVM, so a
 library asserting portability should be able to show it. `marketplace.edge`
-is the host half (kotobase over the network) and is not exercised by
-either.
+is the host half and `.cljs`, so only the ClojureScript run sees it —
+which is where `edge/run` and `edge/outcome` are tested, over an injected
+`ops` map and with no network in sight.
 
 ## What this library refuses to know
 

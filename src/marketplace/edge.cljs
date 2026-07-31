@@ -327,6 +327,99 @@
                    :open-count (count open)
                    :resolved-count (- (count asked) (count open))}))))))
 
+;; ───────────────────────── the actor pass ─────────────────────────
+
+(defn run
+  "One actor pass: advise -> govern -> phase-gate -> commit | escalate |
+  hold. Synchronous, so it is the SAME path the test suite runs; the
+  Promise work is `with-store`'s bracket around it.
+
+  Every marketplace actor's Worker calls this, and it belongs here rather
+  than in each of them for the reason `ledger-routes` does: six copies of
+  a decision pipeline drift, and the one that drifts is the one nobody
+  reads. `ops` is the actor's own five functions, so nothing generic here
+  decides anything:
+
+    :advise      (st request)                  -> proposal
+    :check       (request context proposal st) -> verdict
+    :disposition (verdict)                     -> :commit | :escalate | :hold
+    :gate        (phase request disposition)   -> {:disposition .. :reason ..}
+    :commit!     (st proposal request)         -> record   (only on :commit)
+    :ledger!     (st fact)                                (every outcome)
+    :hold-fact   (request context verdict)     -> fact     (only on :hold)
+
+  THE LEDGER IS WRITTEN ON EVERY PATH, including escalate. An escalation
+  that is not written is a gate nobody can see -- `escalations` reads
+  exactly the `:approval-requested` facts this writes, and pairs them by
+  `:ref`, so both halves of the approval queue are defined in one place.
+
+  Returns the actor's own words: `{:disposition kw :violations [..] :ref
+  .. :op .. :confidence ..}`. `outcome` turns that into a response body."
+  [ops store context request]
+  (let [proposal ((:advise ops) store request)
+        verdict ((:check ops) request context proposal store)
+        base ((:disposition ops) verdict)
+        {:keys [disposition reason]} ((:gate ops) (:phase context) request base)
+        ref (fact-ref request)
+        base-fact {:op (:op request) :ref ref :actor (:actor-id context)}]
+    (case disposition
+      :commit
+      (let [record ((:commit! ops) store proposal request)]
+        ((:ledger! ops) store (assoc base-fact
+                                     :t :committed
+                                     :disposition :commit
+                                     :basis (:cites proposal)
+                                     :summary (:summary proposal)))
+        {:disposition :commit :violations [] :ref ref :op (:op request)
+         :confidence (:confidence verdict) :record record})
+
+      :escalate
+      (do ((:ledger! ops) store (assoc base-fact
+                                       :t :approval-requested
+                                       ;; The phase gate's reason when it is the
+                                       ;; cause, else why the governor stopped
+                                       ;; short of committing. `escalations`
+                                       ;; shows this to whoever has to answer.
+                                       :reason (or reason
+                                                   (cond (:high-stakes? verdict) :always-escalate
+                                                         :else :low-confidence))
+                                       :phase (:phase context)
+                                       :confidence (:confidence verdict)))
+          {:disposition :escalate :violations [] :ref ref :op (:op request)
+           :reason (or reason (if (:high-stakes? verdict) :always-escalate :low-confidence))
+           :confidence (:confidence verdict)})
+
+      (let [fact ((:hold-fact ops) request context verdict)]
+        ((:ledger! ops) store (cond-> (merge base-fact fact {:disposition :hold})
+                                reason (assoc :phase-reason reason
+                                              :phase (:phase context))))
+        {:disposition :hold
+         :violations (:violations verdict)
+         :ref ref :op (:op request) :confidence (:confidence verdict)}))))
+
+(defn outcome
+  "One actor pass as a response body.
+
+  Dispositions and rules go out as STRINGS: this is JSON, and a caller
+  reading `\"hold\"` should not have to know Clojure's keyword printing to
+  compare it. The shape matches what the non-actor routes return by hand
+  (`{:ref .. :disposition \"commit\" :violations []}`), because a client
+  should not need to know which routes ran an actor.
+
+  Violations keep their rule AND their detail. A refusal that says only
+  `escrow-not-releasable` sends the reader back to the source to find out
+  which half was false."
+  [ref result]
+  {:ref ref
+   :disposition (name (:disposition result))
+   :op (some-> (:op result) name)
+   :violations (mapv (fn [v]
+                       (cond-> {:rule (some-> (:rule v) name)}
+                         (:detail v) (assoc :detail (:detail v))))
+                     (:violations result))
+   :reason (some-> (:reason result) name)
+   :confidence (:confidence result)})
+
 ;; ───────────────────────── writes ─────────────────────────
 
 (defn flush-tx!
