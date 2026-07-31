@@ -290,6 +290,76 @@
   [r]
   (or (:accept/refunded-minor r) 0))
 
+;; ───────────────────────────── topping up a short payment ─────────────────
+
+(defn shortfall-minor
+  "What the buyer still owes on this order, or nil when nothing is owed.
+
+  Only `:mpm-static` can produce one honestly -- the buyer typed the
+  amount -- but the figure is computed the same way whatever the mode, so
+  a short capture on any rail can be chased rather than silently sitting
+  as a `:short` nobody acted on."
+  [r]
+  (let [want (:accept/expected-minor r)
+        got  (or (:accept/captured-minor r) 0)]
+    (when (and (integer? want) (> want got))
+      (- want got))))
+
+(defn top-up-request
+  "A second payment request for exactly the shortfall.
+
+  Same order, same PSP, same currency; a NEW code, because the first one
+  was already used for a smaller amount. Defaults to `:mpm-dynamic` -- the
+  amount is known now, so binding it to the code removes the very
+  ambiguity that produced the shortfall, and asking the buyer to type it
+  again invites the same mistake twice.
+
+  nil when there is nothing to chase, or when the record is not in
+  `:captured`: an unpaid order needs the original request, not a top-up,
+  and a refunded one is not owed anything."
+  [r {:keys [expires-at reference mode] :or {mode :mpm-dynamic}}]
+  (when-let [owed (and (= :captured (:accept/state r)) (shortfall-minor r))]
+    (assoc (payment-request {:order (:accept/order r)
+                             :rail (:accept/rail r)
+                             :mode mode
+                             :psp (:accept/psp r)
+                             :expected-minor owed
+                             :currency (:accept/currency r)
+                             :expires-at expires-at
+                             :reference reference})
+           ;; Names what this is chasing, so a second capture cannot be
+           ;; mistaken for a first one against a different order.
+           :accept/tops-up (:accept/psp-transaction r))))
+
+(defn apply-top-up
+  "Book a second capture against the first, so ONE record per order
+  carries the total.
+
+  The alternative -- a second acceptance record -- is what the settlement
+  actor's store would have done by overwriting, and either way the first
+  payment vanishes from the figure the funds gate reads. The buyer paid
+  twice; the record must say so once.
+
+  `request` must be the `top-up-request` for THIS record (checked through
+  `:accept/tops-up`), and the attestation must pass the same
+  `capture-errors` any capture does -- a top-up is not a softer capture.
+  Returns nil otherwise. The PSP transaction ids accumulate, oldest
+  first: reconciling a top-up against the PSP needs both."
+  [r request attestation]
+  (when (and (= :captured (:accept/state r))
+             (= (:accept/order request) (:accept/order r))
+             (= (:accept/tops-up request) (:accept/psp-transaction r))
+             (empty? (capture-errors request attestation)))
+    (let [total (+ (:accept/captured-minor r) (:psp/amount-minor attestation))]
+      (assoc r
+             :accept/captured-minor total
+             :accept/captured-at (:psp/attested-at attestation)
+             :accept/psp-transaction (:psp/transaction-id attestation)
+             :accept/psp-transactions (conj (or (:accept/psp-transactions r)
+                                                [(:accept/psp-transaction r)])
+                                            (:psp/transaction-id attestation))
+             :accept/attested-by (:psp/source attestation)))))
+
 (defn net-captured-minor
   "What the operator still holds from this capture: captured minus
   refunded. nil when nothing was captured.
