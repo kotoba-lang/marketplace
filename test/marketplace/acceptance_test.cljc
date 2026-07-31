@@ -303,3 +303,83 @@
   (testing "and a capture that never happened has no net figure to report"
     (is (nil? (accept/net-captured-minor (req))))
     (is (= :missing (:status (accept/settlement-status (req)))))))
+
+;; ───────────────────────── topping up a short payment ─────────────────────
+
+(defn- short-capture
+  "A static code where the buyer typed 3,850 instead of 38,500."
+  []
+  (accept/capture (req :mode :mpm-static :expires nil) (att :amount 3850)))
+
+(deftest a-shortfall-is-a-number-someone-can-act-on
+  (let [c (short-capture)]
+    (is (= 34650 (accept/shortfall-minor c)))
+    (is (= :short (:status (accept/settlement-status c))))
+    (testing "a settled capture owes nothing"
+      (is (nil? (accept/shortfall-minor (accept/capture (req) (att))))))
+    (testing "and neither does an overpayment — that is a refund, not a top-up"
+      (is (nil? (accept/shortfall-minor
+                 (accept/capture (req :mode :mpm-static :expires nil)
+                                 (att :amount 99999))))))))
+
+(deftest a-top-up-asks-for-exactly-the-shortfall-with-the-amount-bound
+  (let [c (short-capture)
+        t (accept/top-up-request c {:expires-at "2026-07-30T11:00:00Z" :reference "psp-ref-2"})]
+    (is (= 34650 (:accept/expected-minor t)))
+    (is (= "order-1" (:accept/order t)))
+    (is (= "psp-tx-1" (:accept/tops-up t)) "names the capture it is chasing")
+    (testing "dynamic by default — asking the buyer to type it again invites
+              the same mistake twice"
+      (is (= :mpm-dynamic (:accept/mode t)))
+      (is (true? (:accept/amount-bound? t))))
+    (is (= [] (accept/payment-request-errors t)))
+    (testing "nothing to chase, nothing to build"
+      (is (nil? (accept/top-up-request (accept/capture (req) (att)) {:expires-at "t"})))
+      (is (nil? (accept/top-up-request (req) {:expires-at "t"}))
+          "an unpaid order needs the original request, not a top-up"))))
+
+(deftest a-booked-top-up-makes-one-record-carry-the-total
+  (let [c (short-capture)
+        t (accept/top-up-request c {:expires-at "2026-07-30T11:00:00Z"})
+        a2 (att :amount 34650 :txid "psp-tx-2" :at "2026-07-30T10:50:00Z")
+        after (accept/apply-top-up c t a2)]
+    (is (= 38500 (:accept/captured-minor after)))
+    (is (= :settled (:status (accept/settlement-status after))))
+    (is (true? (accept/releasable-to-settlement? after)))
+    (testing "both PSP transactions survive — reconciling needs both"
+      (is (= ["psp-tx-1" "psp-tx-2"] (:accept/psp-transactions after)))
+      (is (= "psp-tx-2" (:accept/psp-transaction after)) "the latest is the head"))
+    (testing "and a refund still comes off the combined total"
+      (let [r (accept/refund-instruction after {:amount-minor 38500 :requested-by "jun"})]
+        (is (some? r))
+        (is (= 0 (accept/net-captured-minor (accept/apply-refund after r))))))))
+
+(deftest a-top-up-is-not-a-softer-capture
+  (let [c (short-capture)
+        t (accept/top-up-request c {:expires-at "2026-07-30T11:00:00Z"})]
+    (testing "a buyer-presented source is refused here too"
+      (is (nil? (accept/apply-top-up c t (att :amount 34650 :source :buyer-screen)))))
+    (testing "the bound amount must match the shortfall exactly"
+      (is (nil? (accept/apply-top-up c t (att :amount 34649)))))
+    (testing "and a code that expired before the money arrived is refused"
+      (is (nil? (accept/apply-top-up c t (att :amount 34650
+                                              :at "2026-07-30T11:00:01Z")))))))
+
+(deftest a-top-up-cannot-be-booked-against-the-wrong-capture
+  (let [c (short-capture)
+        t (accept/top-up-request c {:expires-at "2026-07-30T11:00:00Z"})
+        a2 (att :amount 34650 :txid "psp-tx-2")]
+    (testing "wrong order"
+      (is (nil? (accept/apply-top-up c (assoc t :accept/order "order-9") a2))))
+    (testing "chasing a different transaction — the same order can have more
+              than one capture, and crediting the wrong one hides a shortfall"
+      (is (nil? (accept/apply-top-up c (assoc t :accept/tops-up "psp-tx-9") a2))))
+    (testing "a plain request that is not a top-up at all"
+      (is (nil? (accept/apply-top-up c (dissoc t :accept/tops-up) a2))))
+    (testing "and a fully refunded record has nothing to top up"
+      (let [full (accept/capture (req) (att))
+            refunded (accept/apply-refund
+                      full (accept/refund-instruction full {:amount-minor 38500
+                                                            :requested-by "jun"}))]
+        (is (nil? (accept/top-up-request refunded {:expires-at "t"})))
+        (is (nil? (accept/apply-top-up refunded t a2)))))))
