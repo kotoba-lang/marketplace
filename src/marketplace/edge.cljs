@@ -37,7 +37,7 @@
   Bracket access (`aget`) throughout, for `:advanced-optimization`
   safety."
   (:require [cljs.reader :as reader]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [kotobase.client :as kb]
             [marketplace.persist :as persist]))
 
