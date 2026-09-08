@@ -58,7 +58,7 @@
   Application-owned per the policy split (`:policy/application-owns
   [:datoms :queries :domain-schema :retention-classification]`)."
   (:require [clojure.edn :as edn]
-            [clojure.string :as str]))
+            [kotoba.lang.text :as str]))
 
 ;; ───────────────────────────── codec ─────────────────────────────
 

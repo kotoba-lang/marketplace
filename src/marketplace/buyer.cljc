@@ -35,7 +35,7 @@
   `(redact buyer)`.
 
   Pure: no clock, no network, no randomness."
-  (:require [clojure.string :as str]))
+  (:require [kotoba.lang.text :as str]))
 
 ;; ───────────────────────────── levels ─────────────────────────────
 
@@ -72,7 +72,7 @@
   (cond-> {:address/line1     line1
            :address/city      city
            :address/postal-code postal-code
-           :address/country   (some-> country str/upper-case)
+           :address/country   (some-> country str/upper)
            :address/recipient recipient
            :address/retention retention}
     line2  (assoc :address/line2 line2)
@@ -119,7 +119,7 @@
    :buyer/contact      contact
    :buyer/display-name display-name
    :buyer/level        level
-   :buyer/country      (some-> country str/upper-case)
+   :buyer/country      (some-> country str/upper)
    :buyer/created-at   created-at
    :buyer/addresses    (vec addresses)
    ;; Stated on the record so no downstream reader has to infer it: a

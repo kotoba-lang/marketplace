@@ -29,7 +29,7 @@
 
   Pure: no clock, no network, no randomness — `now` and the delivery
   date are the caller's."
-  (:require [clojure.string :as str]))
+  (:require [kotoba.lang.text :as str]))
 
 ;; ───────────────────────────── policy ─────────────────────────────
 

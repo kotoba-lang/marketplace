@@ -36,7 +36,7 @@
   namespace does not break it.
 
   Pure: no clock, no network, no randomness."
-  (:require [clojure.string :as str]))
+  (:require [kotoba.lang.text :as str]))
 
 ;; ───────────────────────────── HS classification ─────────────────────────────
 
@@ -103,7 +103,7 @@
   that computed figures must rest on real data with a date and a
   citation."
   [{:keys [destination hs6 ad-valorem-bps vat-bps source as-of de-minimis-minor]}]
-  {:rate/destination      (some-> destination str/upper-case)
+  {:rate/destination      (some-> destination str/upper)
    :rate/hs6              hs6
    :rate/ad-valorem-bps   ad-valorem-bps
    :rate/vat-bps          vat-bps
@@ -168,7 +168,7 @@
   [{:keys [goods-minor shipping-minor insurance-minor destination hs6 currency]
     :or   {shipping-minor 0 insurance-minor 0}}
    rates]
-  (let [dest   (some-> destination str/upper-case)
+  (let [dest   (some-> destination str/upper)
         row    (get rates [dest hs6])
         cif    (+ goods-minor shipping-minor insurance-minor)]
     (if-not row

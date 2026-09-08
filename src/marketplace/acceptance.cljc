@@ -46,7 +46,7 @@
   accepts only `attestation-sources` — a webhook the PSP sent, or an
   answer to a query the merchant made — and refuses a buyer-presented
   claim by NAME (`:buyer-presented-evidence`), not as a generic unknown."
-  (:require [clojure.string :as str]))
+  (:require [kotoba.lang.text :as str]))
 
 ;; ───────────────────────────── rails and modes ─────────────────────────────
 

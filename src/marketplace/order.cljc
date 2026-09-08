@@ -27,7 +27,7 @@
   moving keeps the whole order in flight.
 
   Pure: no clock, no network, no randomness."
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [kotoba.okaimono :as ok]))
 
 ;; ───────────────────────────── construction ─────────────────────────────

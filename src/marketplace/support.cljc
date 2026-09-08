@@ -28,7 +28,7 @@
   be worked.
 
   Pure: no clock, no network, no randomness."
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [marketplace.crossborder :as cb]))
 
 ;; ───────────────────────────── ticket ─────────────────────────────
