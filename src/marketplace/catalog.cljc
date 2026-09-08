@@ -34,7 +34,7 @@
   cannot observe.
 
   Pure: no clock, no network, no randomness."
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [kotoba.product-party :as pp]))
 
 ;; ───────────────────────────── vocabulary ─────────────────────────────
@@ -90,7 +90,7 @@
              :offer/condition    condition
              :offer/availability availability}
       quantity       (assoc :offer/quantity quantity)
-      ships-from     (assoc :offer/ships-from (str/upper-case (str ships-from)))
+      ships-from     (assoc :offer/ships-from (str/upper (str ships-from)))
       lead-time-days (assoc :offer/lead-time-days lead-time-days)
       note           (assoc :offer/note note))))
 

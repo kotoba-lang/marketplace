@@ -32,7 +32,7 @@
   same discipline `kotoba.omise` uses for opening hours — lexicographic
   compare on ISO-8601 UTC is chronological compare."
   (:require [aml.core :as aml]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [ekyc.core :as ekyc]))
 
 ;; ───────────────────────────── vocabulary ─────────────────────────────
@@ -141,7 +141,7 @@
   (cond-> {:seller/id            (str id)
            :seller/kind          kind
            :seller/legal-name    legal-name
-           :seller/country       (some-> country str/upper-case)
+           :seller/country       (some-> country str/upper)
            :seller/issuer        issuer
            :seller/issued-at     issued-at
            :seller/expires-at    expires-at

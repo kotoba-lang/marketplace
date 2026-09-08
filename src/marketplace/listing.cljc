@@ -38,7 +38,7 @@
   presence of a search projection as a claim of good Japanese recall.
 
   Pure: no clock, no network, no randomness."
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [marketplace.catalog :as catalog]
             [search.model :as search]))
 

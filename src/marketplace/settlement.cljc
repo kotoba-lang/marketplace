@@ -31,7 +31,7 @@
   micros and conflating the two would be a real bug.
 
   Pure: no clock, no network, no randomness."
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [pay.core :as pay]))
 
 ;; ───────────────────────────── fee schedule ─────────────────────────────

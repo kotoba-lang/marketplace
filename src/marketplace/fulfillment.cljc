@@ -24,7 +24,7 @@
   `marketplace.settlement` draws around moving money.
 
   Pure: no clock, no network, no randomness."
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [kotoba.okaimono :as ok]
             [kotoba.robotics :as robo]))
 
