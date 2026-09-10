@@ -3,8 +3,9 @@
 **Federated marketplace protocol primitives — pure `.cljc`, no network
 I/O, no clock, no key custody.**
 
-**Maturity**: :implemented — 12 namespaces with a green suite (169 tests
-/ 719 assertions), consumed by 13 sibling repos. Implemented means the
+**Maturity**: :implemented — 13 namespaces with a green suite (180 tests
+/ 774 assertions on the JVM, 188 / 811 under ClojureScript, which also
+sees `marketplace.edge`), consumed by 13 sibling repos. Implemented means the
 contracts exist, are tested and are depended on; it does **not** mean a
 production transaction has settled through them. Nothing here reaches a
 network, and the `acceptance` rail is connected to no PSP. Stated
@@ -83,6 +84,32 @@ exclusions with reasons, so a seller who lost can reproduce the result.
                   :eligible? #(seller/sellable? (sellers (:offer/seller %)) now home)})
 ;; => {:buy-box/winner {…} :buy-box/ranked [… …] :buy-box/excluded [{:offer/id … :reason :not-in-stock}]}
 ```
+
+**`docs/buy-box.html` is that claim, executed.** Open it: six sellers on one
+canonical product, the ranking, and the two exclusions with their reasons.
+Every id, amount and reason on the page is a value the library returned on
+the run that wrote the file — the generator is
+`tools/marketplace_demo/buy_box.cljs` and the page is its output, not a
+mock-up of one.
+
+```bash
+npm run demo    # shadow-cljs compile demo && node out/gen-buy-box-demo.js
+```
+
+It **refuses to write** rather than shipping a page that proves nothing: no
+exclusions, or a winner that also holds the lowest sticker price (then the
+page cannot tell a landed-price ranking from a naive one), or a money
+string whose thousands separators do not group by three. And before it
+trusts its own round-trip check, it runs that check against a copy of the
+render with one digit changed and refuses if the copy passes — a verifier
+that never fires is indistinguishable from one that cannot.
+
+That last guard is not hypothetical. The first version of the generator
+formatted ¥12,800 as `¥1,280,0`; the build was green, the round-trip check
+passed (it compares the render against the formatter's own output, so a
+wrong number renders faithfully), and only reading the artifact caught it.
+The boundary probes now in `money-refusals` — 999, 1000, 1001 — catch it
+without depending on the scenario's amounts.
 
 Mixed currencies are **refused, not converted** — this library has no FX
 rate and will not invent one.
@@ -183,8 +210,10 @@ of good Japanese recall.
 ## Test
 
 ```bash
-clojure -M:test    # 56 tests, 323 assertions
-clojure -M:lint
+clojure -M:test                    # JVM — 180 tests, 774 assertions
+npm install && npm run test:cljs   # ClojureScript on Node — 188 / 811
+                                   #   (the same core PLUS marketplace.edge)
+clojure -M:lint                    # src, test and tools
 ```
 
 ## Consumers

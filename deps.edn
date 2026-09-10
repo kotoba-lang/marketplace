@@ -59,7 +59,24 @@
   :cljs-test {:extra-paths ["test"]
               :extra-deps {org.clojure/clojurescript {:mvn/version "1.11.132"}
                            thheller/shadow-cljs {:mvn/version "2.28.20"}}}
+  ;; The buy-box demo GENERATOR (`tools/`), not the library. Kept in an
+  ;; alias rather than :deps on purpose -- jp-go-dds is what draws the page
+  ;; and has no business on a consumer's classpath, and `tools/` is not
+  ;; `src/`, so nothing here is shipped by this library.
+  :demo {:extra-paths ["tools"]
+         :extra-deps {org.clojure/clojurescript {:mvn/version "1.11.132"}
+                      thheller/shadow-cljs {:mvn/version "2.28.20"}
+                      ;; デジタル庁デザインシステム (DADS) -- the workspace's
+                      ;; base design system (CLAUDE.md / ADR-2608050000). Its
+                      ;; KIR oracle is behind #?@(:clj ...), so a ClojureScript
+                      ;; consumer never puts an interpreter on its classpath.
+                      io.github.kotoba-lang/jp-go-digital-design-system
+                      {:git/url "https://github.com/kotoba-lang/jp-go-digital-design-system.git"
+                       :git/sha "581b68cb7699e4017d3532bc17e134a41be00fef"}}}
   :lint {:replace-deps {clj-kondo/clj-kondo {:mvn/version "2024.11.14"}}
          :main-opts    ["-m" "clj-kondo.main"
-                        "--lint" "src" "test"
+                        ;; `tools` too: the demo generator is not shipped, but
+                        ;; it is the only thing that writes docs/buy-box.html,
+                        ;; so an unlinted one is an unlinted artifact.
+                        "--lint" "src" "test" "tools"
                         "--fail-level" "error"]}}}
