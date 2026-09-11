@@ -93,7 +93,7 @@ the run that wrote the file — the generator is
 mock-up of one.
 
 ```bash
-npm run demo    # shadow-cljs compile demo && node out/gen-buy-box-demo.js
+npm run demo    # amu compile --target wasm32-browser demo && node out/gen-buy-box-demo.js
 ```
 
 It **refuses to write** rather than shipping a page that proves nothing: no
@@ -173,7 +173,7 @@ the same money given back twice.
 The `.cljc` core runs on both, and the suite is the same suite:
 
 ```bash
-clojure -M:test            # JVM — the portable .cljc core
+kbb -M:test            # JVM — the portable .cljc core
 npm install && npm run test:cljs   # ClojureScript on Node — the same core
                                    # PLUS the host half (marketplace.edge)
 ```
@@ -210,10 +210,10 @@ of good Japanese recall.
 ## Test
 
 ```bash
-clojure -M:test                    # JVM — 180 tests, 774 assertions
+kbb -M:test                    # JVM — 180 tests, 774 assertions
 npm install && npm run test:cljs   # ClojureScript on Node — 188 / 811
                                    #   (the same core PLUS marketplace.edge)
-clojure -M:lint                    # src, test and tools
+kbb -M:lint                    # src, test and tools
 ```
 
 ## Consumers

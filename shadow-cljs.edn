@@ -2,7 +2,7 @@
 ;;
 ;; CLAUDE.md's runtime priority puts ClojureScript above the JVM, and every
 ;; namespace in this library except `marketplace.edge` is `.cljc` -- but for
-;; a while the only thing that ever ran the suite was `clojure -M:test` on
+;; a while the only thing that ever ran the suite was `kbb -M:test` on
 ;; the JVM, so "portable" was an assertion rather than a fact. This build
 ;; makes it checkable: `npm run test:cljs`.
 ;;
