@@ -316,7 +316,7 @@
         [:p "このページは "
          [:code "marketplace.catalog/buy-box"] " を実際に実行して生成した。"
          "表に出ている id・金額・除外理由は、そのときライブラリが返した値そのもので、手で書いたものは一つもない。"
-         "生成器は " [:code "tools/marketplace_demo/buy_box.cljs"] "。"]
+         "生成器は " [:code "tools/marketplace_demo/buy_box.cljk"] "。"]
         (dds/notification-banner
          {:type :info-1 :heading (str "買い箱: " wname " — " (yen (+ (:offer/price-minor winner)
                                                                      (get (:shipping sc) (:offer/id winner) 0))))}

@@ -89,7 +89,7 @@ exclusions with reasons, so a seller who lost can reproduce the result.
 canonical product, the ranking, and the two exclusions with their reasons.
 Every id, amount and reason on the page is a value the library returned on
 the run that wrote the file — the generator is
-`tools/marketplace_demo/buy_box.cljs` and the page is its output, not a
+`tools/marketplace_demo/buy_box.cljk` and the page is its output, not a
 mock-up of one.
 
 ```bash
