@@ -45,7 +45,7 @@
 
   Run it:
 
-      npm run demo    # shadow-cljs compile demo && node out/gen-buy-box-demo.js"
+      npm run demo    # amu compile --target wasm32-browser demo && node out/gen-buy-box-demo.js"
   (:require [kotoba.lang.text :as str]
             [kotoba.product-party :as pp]
             [ekyc.model :as ekyc-model]

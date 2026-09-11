@@ -54,7 +54,7 @@
                       thheller/shadow-cljs {:mvn/version "2.28.20"}}}
   ;; What `shadow-cljs.edn` resolves. Separate from :test on purpose: that
   ;; alias carries :main-opts for the JVM test-runner, and shadow-cljs
-  ;; passes the alias through to `clojure -A`, where those opts are handed
+  ;; passes the alias through to `kbb -A`, where those opts are handed
   ;; to the wrong main and the build dies with "Unknown option: --npm".
   :cljs-test {:extra-paths ["test"]
               :extra-deps {org.clojure/clojurescript {:mvn/version "1.11.132"}
