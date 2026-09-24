@@ -57,7 +57,7 @@
   the datom layer does not expand a nested order into sub-entities.
   Application-owned per the policy split (`:policy/application-owns
   [:datoms :queries :domain-schema :retention-classification]`)."
-  (:require [clojure.edn :as edn]
+  (:require [kotoba.lang.edn :as edn]
             [kotoba.lang.text :as str]))
 
 ;; ───────────────────────────── codec ─────────────────────────────
