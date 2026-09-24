@@ -1,5 +1,5 @@
 (ns marketplace.settlement-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [marketplace.settlement :as st]))
 
 (def operator "merchant.marketplace-operator")

@@ -1,5 +1,5 @@
 (ns marketplace.returns-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [marketplace.crossborder :as cb]
             [marketplace.returns :as ret]))
 

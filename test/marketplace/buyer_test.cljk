@@ -1,5 +1,5 @@
 (ns marketplace.buyer-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [marketplace.buyer :as buyer]))
 
 (defn- addr [& {:as over}]

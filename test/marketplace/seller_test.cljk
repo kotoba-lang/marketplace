@@ -1,5 +1,5 @@
 (ns marketplace.seller-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [ekyc.model :as ekyc-model]
             [marketplace.seller :as seller]))
 

@@ -1,5 +1,5 @@
 (ns marketplace.acceptance-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [marketplace.acceptance :as accept]
             [marketplace.settlement :as st]))
 

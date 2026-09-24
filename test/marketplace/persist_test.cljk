@@ -1,5 +1,5 @@
 (ns marketplace.persist-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [marketplace.persist :as p]))
 
 (defn- st [] (p/store {:db-api (p/mem-db-api) :actor "orderops"}))
