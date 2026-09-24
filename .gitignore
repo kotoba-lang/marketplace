@@ -8,3 +8,4 @@ target/
 node_modules/
 out/
 .shadow-cljs/
+.nbb/

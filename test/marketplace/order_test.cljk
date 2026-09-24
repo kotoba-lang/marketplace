@@ -1,5 +1,5 @@
 (ns marketplace.order-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.okaimono :as ok]
             [marketplace.order :as order]))
 

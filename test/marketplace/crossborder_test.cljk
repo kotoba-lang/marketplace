@@ -1,5 +1,5 @@
 (ns marketplace.crossborder-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [marketplace.crossborder :as cb]))
 
 ;; NOTE: these rates are TEST FIXTURES with fabricated-for-testing

@@ -1,5 +1,5 @@
 (ns marketplace.listing-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.product-party :as pp]
             [marketplace.catalog :as catalog]
             [marketplace.listing :as listing]))
