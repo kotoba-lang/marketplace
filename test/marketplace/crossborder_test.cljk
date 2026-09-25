@@ -84,7 +84,7 @@
                                                   :source "x"})))))
   (testing "rate-table refuses a bad row rather than silently indexing it —
             one bad row mis-quotes every order that hits it"
-    (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs js/Error)
+    (is (thrown? js/Error
                  (cb/rate-table [(cb/duty-rate {:destination "JPN" :hs6 "22021"
                                                 :ad-valorem-bps 500 :vat-bps 1000
                                                 :source "x" :as-of "2026-01-01"})])))))
