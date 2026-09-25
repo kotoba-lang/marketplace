@@ -124,7 +124,7 @@
     (is (= c (catalog/remove-offer c "offer.nonexistent")) "removing an unknown id is a no-op")))
 
 (deftest add-offer-refuses-invalid
-  (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs js/Error)
+  (is (thrown? js/Error
                (catalog/add-offer (catalog/empty-catalog) (o "merchant.a" -5)))))
 
 (deftest merchant-edge-never-asserts-brand-ownership

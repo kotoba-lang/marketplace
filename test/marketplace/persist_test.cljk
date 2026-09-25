@@ -10,19 +10,19 @@
   (testing "the policy says :policy/fail-closed-without-host-injection true —
             an actor whose host wiring is missing must not come up quietly
             writing to a map that vanishes on restart"
-    (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs js/Error)
+    (is (thrown? js/Error
                  (p/store {:actor "orderops"})))
-    (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs js/Error)
+    (is (thrown? js/Error
                  (p/store {:db-api nil :actor "orderops"})))))
 
 (deftest a-partial-database-api-is-an-error-not-a-fallback
   (let [errs (p/db-api-errors {:transact! identity :q identity})]
     (is (= #{:pull :datoms} (set (map :persist.error/fn errs))))
-    (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs js/Error)
+    (is (thrown? js/Error
                  (p/store {:db-api {:transact! identity :q identity} :actor "x"})))))
 
 (deftest an-actor-name-is-required-for-stream-scoping
-  (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs js/Error)
+  (is (thrown? js/Error
                (p/store {:db-api (p/mem-db-api)}))))
 
 (deftest the-memory-backend-is-labelled-so-a-readiness-check-can-refuse-it
