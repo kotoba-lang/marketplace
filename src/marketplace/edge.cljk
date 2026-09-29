@@ -46,7 +46,7 @@
 (def default-db
   "ONE ref for the whole marketplace.
 
-  CLAUDE.md's kotobase rule is that a Datalog join reaches exactly one
+  AGENTS.md's kotobase rule is that a Datalog join reaches exactly one
   ref: `open` takes a single `:ref-name`, so anything split across refs
   can never be joined again. Everything here wants joining — an order
   against the credential that admitted its seller, a payout against the
@@ -133,7 +133,7 @@
   host, and it is a limit on ORDER, not on retention: nothing is lost.
 
   A globally monotonic sequence needs a single writer. The right one
-  here is a Durable Object used purely as a serializer (CLAUDE.md: a DO
+  here is a Durable Object used purely as a serializer (AGENTS.md: a DO
   is globally unique and single-threaded, so \"exactly one writer\" comes
   for free rather than being implemented with leases and fencing). That
   is a deliberate later step, not an oversight."

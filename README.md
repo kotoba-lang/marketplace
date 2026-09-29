@@ -178,7 +178,7 @@ npm install && npm run test:cljs   # ClojureScript on Node — the same core
                                    # PLUS the host half (marketplace.edge)
 ```
 
-CLAUDE.md's runtime priority puts ClojureScript above the JVM, so a
+AGENTS.md's runtime priority puts ClojureScript above the JVM, so a
 library asserting portability should be able to show it. `marketplace.edge`
 is the host half and `.cljs`, so only the ClojureScript run sees it —
 which is where `edge/run` and `edge/outcome` are tested, over an injected
