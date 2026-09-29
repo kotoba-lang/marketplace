@@ -31,7 +31,7 @@
   `mismatches` reads the rendered table back and counts cells that
   disagree with the computed result — a COUNT, not a boolean, because a
   boolean cannot tell one drifted cell from a render that collapsed.
-  Byte-identity is not enough on its own: CLAUDE.md records two defects
+  Byte-identity is not enough on its own: AGENTS.md records two defects
   from 2026-09-09 where a build succeeded and the output was wrong
   (`str/replace` letting JavaScript interpret `$&` in the replacement,
   and `js->clj` dropping a match's `.index`), and only a check that read
@@ -60,7 +60,7 @@
             ["node:path" :as path]))
 
 ;; The vendored DADS stylesheet, inlined at COMPILE time. The page has to
-;; be one self-contained file (CLAUDE.md's app plane: a document that
+;; be one self-contained file (AGENTS.md's app plane: a document that
 ;; fetches its own runtime over the network is not covered by its own
 ;; address), and a Node script cannot slurp a classpath resource at run
 ;; time anyway.
@@ -253,7 +253,7 @@
         ["buy-box reports landed? false — the shipping quotes did not reach it"])
       ;; Every amount this page will print, plus boundary widths the
       ;; scenario happens not to reach. A comparison whose inputs never
-      ;; sit on the boundary cannot see the boundary (CLAUDE.md, 5th of
+      ;; sit on the boundary cannot see the boundary (AGENTS.md, 5th of
       ;; the eight questions).
       (money-refusals (concat [0 1 999 1000 1001 999999 1000000]
                               (map :offer/price-minor (:offers sc))

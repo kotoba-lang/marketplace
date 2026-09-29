@@ -17,7 +17,7 @@ jobs:
       - run: clojure -M:lint
 
       # The same portable .cljc suite under a real ClojureScript host --
-      # CLAUDE.md's runtime priority puts cljs above the JVM, and until this
+      # AGENTS.md's runtime priority puts cljs above the JVM, and until this
       # existed "portable" was an assertion nobody checked.
       #
       # NOTE: this fleet's GitHub Actions are not currently executing
